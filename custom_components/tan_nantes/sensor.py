@@ -24,10 +24,19 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     # Coordinator to manage updates (every 60s)
     coordinator = TanDataCoordinator(hass, stop_code)
+    
+    # Register coordinator for WS access
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN].setdefault("coordinators", {})
+    hass.data[DOMAIN]["coordinators"][stop_code] = coordinator
+    
     await coordinator.async_config_entry_first_refresh()
 
     # Create a main sensor
-    async_add_entities([TanSensor(coordinator, stop_name)], True)
+    async_add_entities([
+        TanNextDeparturesSensor(coordinator, stop_name),
+        TanScheduleSensor(coordinator, stop_name)
+    ], True)
 
 class TanDataCoordinator(DataUpdateCoordinator):
     """Manage API data retrieval."""
@@ -81,6 +90,8 @@ class TanDataCoordinator(DataUpdateCoordinator):
 
             # Enrich data with traffic info from schedules and prepare for frontend
             final_schedules = {}
+            next_departures = []
+            
             for passage in data:
                 stop_id = passage.get("arret", {}).get("codeArret")
                 line_num = passage.get("ligne", {}).get("numLigne")
@@ -103,25 +114,50 @@ class TanDataCoordinator(DataUpdateCoordinator):
                     
                     # Prepare schedule for frontend
                     if sched.get("horaires"):
-                        # Create a shallow copy to inject direction label
-                        sched_data = sched.copy()
-                        dir_key = f"directionSens{direction}"
+                        # Compress horaires to { "HH": ["mm", "mm"] } to save space
+                        # This significantly reduces JSON size compared to list of dicts with repeated keys
+                        compressed_horaires = {}
+                        for h in sched.get("horaires", []):
+                            if "heure" in h and "passages" in h:
+                                compressed_horaires[h["heure"]] = h["passages"]
+
+                        sched_data = {
+                            "horaires": compressed_horaires,
+                            "ligne": {
+                                "numLigne": sched.get("ligne", {}).get("numLigne"),
+                                "direction": sched.get("ligne", {}).get("direction")
+                            }
+                        }
                         
-                        if "ligne" in sched_data and dir_key in sched_data["ligne"]:
-                            sched_data["direction_label"] = sched_data["ligne"][dir_key]
+                        dir_key = f"directionSens{direction}"
+                        if "ligne" in sched and dir_key in sched["ligne"]:
+                            sched_data["direction_label"] = sched["ligne"][dir_key]
                         else:
                             sched_data["direction_label"] = f"Sens {direction}"
                             
                         final_schedules[f"{line_num}-{direction}"] = sched_data
 
+                # Prepare next departures
+                line_info = passage.get("ligne", {})
+                next_departures.append({
+                    "line": line_info.get("numLigne"),
+                    "type": line_info.get("typeLigne"),
+                    "destination": passage.get("terminus"),
+                    "time": passage.get("temps"),
+                    "direction": passage.get("sens"),
+                    "traffic_info": passage.get("infotrafic"),
+                    "traffic_message": passage.get("infotrafic_message"),
+                    "traffic_type": passage.get("infotrafic_type", "alert")
+                })
+
             return {
-                "passages": data,
+                "next_departures": next_departures,
                 "schedules": final_schedules
             }
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}")
 
-class TanSensor(SensorEntity):
+class TanNextDeparturesSensor(SensorEntity):
     """Represent the next bus at the stop."""
 
     def __init__(self, coordinator, stop_name):
@@ -135,40 +171,49 @@ class TanSensor(SensorEntity):
     def native_value(self):
         """Return the time of the very first bus."""
         data = self.coordinator.data
-        passages = data.get("passages", []) if data else []
+        passages = data.get("next_departures", []) if data else []
         
         if passages and isinstance(passages, list) and len(passages) > 0:
-            return passages[0].get("temps", "Indisponible")
+            return passages[0].get("time", "Indisponible")
         return "No bus"
 
     @property
     def extra_state_attributes(self):
         """Return all next passages as attributes."""
+        return {
+            "stop_code": self.coordinator.stop_code
+        }
+
+    async def async_update(self):
+        """Update via the coordinator."""
+        await self.coordinator.async_request_refresh()
+
+class TanScheduleSensor(SensorEntity):
+    """Represent the schedules at the stop."""
+
+    def __init__(self, coordinator, stop_name):
+        self.coordinator = coordinator
+        self._stop_name = stop_name
+        self._attr_unique_id = f"tan_{coordinator.stop_code}_schedules"
+        self._attr_name = f"Tan Schedules - {stop_name}"
+        self._attr_icon = "mdi:timetable"
+
+    @property
+    def native_value(self):
+        """Return the number of schedules available."""
+        data = self.coordinator.data
+        schedules = data.get("schedules", {}) if data else {}
+        return len(schedules)
+
+    @property
+    def extra_state_attributes(self):
+        """Return schedules as attributes."""
         data = self.coordinator.data
         if not data:
             return {}
         
-        passages = data.get("passages", [])
-        schedules = data.get("schedules", {})
-        
-        next_buses = []
-        for passage in passages:
-            line_info = passage.get("ligne", {})
-            next_buses.append({
-                "line": line_info.get("numLigne"),
-                "type": line_info.get("typeLigne"),
-                "destination": passage.get("terminus"),
-                "time": passage.get("temps"),
-                "direction": passage.get("sens"),
-                "traffic_info": passage.get("infotrafic"),
-                "traffic_message": passage.get("infotrafic_message"),
-                "traffic_type": passage.get("infotrafic_type", "alert")
-            })
-            
         return {
-            "stop_code": self.coordinator.stop_code,
-            "next_departures": next_buses,
-            "schedules": schedules
+            "schedules": data.get("schedules", {})
         }
 
     async def async_update(self):
