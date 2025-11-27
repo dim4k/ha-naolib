@@ -1,11 +1,12 @@
 {
-  "domain": "tan_nantes",
-  "name": "Tan Nantes",
-  "codeowners": ["@dim4K"],
-  "config_flow": true,
-  "documentation": "https://github.com/dim4K/ha-tan-nantes",
-  "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/dim4K/ha-tan-nantes/issues",
-  "requirements": [],
-  "version": "1.0.0"
+    "domain": "tan_nantes",
+    "name": "Tan Nantes",
+    "codeowners": ["@dim4K"],
+    "config_flow": true,
+    "dependencies": ["http"],
+    "documentation": "https://github.com/dim4K/ha-tan-nantes",
+    "iot_class": "cloud_polling",
+    "issue_tracker": "https://github.com/dim4K/ha-tan-nantes/issues",
+    "requirements": [],
+    "version": "1.2.0"
 }

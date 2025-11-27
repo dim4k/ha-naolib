@@ -29,8 +29,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
         ])
 
-        # 2. Inject JS directly into the frontend with version for cache busting
-        add_extra_js_url(hass, f"{url_path}/tan-card.js?v={version}")
+        # 2. Register the card as a Lovelace resource
+        # This is required for the card to be recognized by the dashboard
+        try:
+            resources = hass.data["lovelace"].resources
+            if not resources.loaded:
+                await resources.async_load()
+            
+            card_url = f"{url_path}/tan-card.js?hacstag={version}"
+            
+            # Check if already registered, update version if needed
+            found = False
+            for resource in resources.async_items():
+                if resource["url"].startswith(url_path):
+                    found = True
+                    if resource["url"] != card_url:
+                        await resources.async_update_item(resource["id"], {"url": card_url})
+                    break
+            
+            if not found:
+                await resources.async_create_item({"res_type": "module", "url": card_url})
+        except Exception:
+            pass
         
         # 3. Register WebSocket command
         websocket_api.async_register_command(hass, handle_get_data)
@@ -46,7 +66,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     vol.Required("type"): "tan_nantes/get_data",
     vol.Required("stop_code"): str,
 })
-def handle_get_data(hass, connection, msg):
+def handle_get_data(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     """Handle get data command."""
     stop_code = msg["stop_code"]
     coordinator = hass.data[DOMAIN]["coordinators"].get(stop_code)

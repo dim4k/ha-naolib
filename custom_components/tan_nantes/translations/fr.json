@@ -1,0 +1,21 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Configuration Tan Nantes",
+                "description": "Entrez vos coordonnées GPS pour trouver l'arrêt le plus proche.",
+                "data": {
+                    "latitude": "Latitude",
+                    "longitude": "Longitude"
+                }
+            }
+        },
+        "error": {
+            "no_stops_found": "Aucun arrêt trouvé à proximité.",
+            "unknown": "Erreur inattendue."
+        },
+        "abort": {
+            "already_configured": "L'appareil est déjà configuré"
+        }
+    }
+}

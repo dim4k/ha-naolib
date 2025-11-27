@@ -1,6 +1,8 @@
 import logging
+from typing import Any, Optional
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import DOMAIN, CONF_STOP_CODE, CONF_STOP_LABEL
 from .api import TanApiClient
@@ -12,7 +14,7 @@ class TanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    async def async_step_user(self, user_input: dict | None = None):
+    async def async_step_user(self, user_input: Optional[dict[str, Any]] = None) -> FlowResult:
         """Handle the initial step (user input)."""
         errors: dict[str, str] = {}
 

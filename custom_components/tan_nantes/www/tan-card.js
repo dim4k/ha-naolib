@@ -1,34 +1,74 @@
 class TanNantesCard extends HTMLElement {
-    static getStubConfig() {
+    static getStubConfig(hass, entities, entitiesFallback) {
+        // Try to find an entity in the list of states
+        const entity = Object.keys(hass.states).find((eid) =>
+            eid.startsWith("sensor.tan_next_")
+        );
         return {
-            entity: "sensor.tan_next_commerce",
+            entity: entity || "",
         };
     }
 
+    static getConfigElement() {
+        return document.createElement("tan-nantes-card-editor");
+    }
+
     setConfig(config) {
-        if (!config.entity) throw new Error("You must define an entity");
         this.config = config;
     }
 
     set hass(hass) {
-        const entityId = this.config.entity;
+        let entityId = this.config.entity;
+
+        // Fallback: try to find an entity if none is configured
+        if (!entityId) {
+            const found = Object.keys(hass.states).find((eid) =>
+                eid.startsWith("sensor.tan_next_")
+            );
+            if (found) {
+                entityId = found;
+                // Update config to persist the found entity
+                this.config = { ...this.config, entity: entityId };
+            }
+        }
+
+        if (!this.content) this._initShadowDom();
+        if (!entityId) {
+            this.content.innerHTML = `<div class="no-bus" style="padding: 16px;">No Tan Nantes entities found. Please add the integration via Settings > Devices & Services.</div>`;
+            return;
+        }
+
         const state = hass.states[entityId];
 
-        if (!state) return;
+        if (!state) {
+            this.content.innerHTML = `<div class="no-bus">Entity not found: ${entityId}</div>`;
+            return;
+        }
 
         // Check if state changed to trigger re-render or data fetch
-        if (this._state && this._state.last_updated === state.last_updated)
+        if (
+            this._state &&
+            this._state.last_updated === state.last_updated &&
+            this._state.entity_id === entityId
+        )
             return;
 
         this._state = state;
-
-        if (!this.content) this._initShadowDom();
 
         this._updateTitle(state.attributes.friendly_name);
 
         // Fetch data via WebSocket
         const stopCode = state.attributes.stop_code;
         if (stopCode) {
+            // Show loading if we are switching entities or recovering from error
+            if (
+                !this._data ||
+                this.content.innerHTML.includes("No Tan Nantes") ||
+                this.content.innerHTML.includes("Entity not found")
+            ) {
+                this.content.innerHTML = `<div class="no-bus">Chargement...</div>`;
+            }
+
             hass.callWS({
                 type: "tan_nantes/get_data",
                 stop_code: stopCode,
@@ -45,7 +85,6 @@ class TanNantesCard extends HTMLElement {
             this.content.innerHTML = `<div class="no-bus">Entité non configurée (stop_code manquant)</div>`;
         }
     }
-
     _initShadowDom() {
         this.attachShadow({ mode: "open" });
         this.shadowRoot.innerHTML = `
@@ -352,6 +391,64 @@ class TanNantesCard extends HTMLElement {
 }
 
 customElements.define("tan-nantes-card", TanNantesCard);
+
+class TanNantesCardEditor extends HTMLElement {
+    setConfig(config) {
+        this._config = config;
+        if (this.content) {
+            const picker = this.content.querySelector("ha-entity-picker");
+            if (picker) picker.value = config.entity;
+        }
+    }
+
+    set hass(hass) {
+        this._hass = hass;
+        if (!this.content) {
+            this._init();
+        }
+    }
+
+    _init() {
+        this.content = document.createElement("div");
+        this.content.innerHTML = `
+            <div class="card-config">
+                <ha-entity-picker
+                    label="Entité (sensor.tan_next_...)"
+                    domain-filter="sensor"
+                    include-domains='["sensor"]'
+                ></ha-entity-picker>
+            </div>
+        `;
+        this.appendChild(this.content);
+
+        const picker = this.content.querySelector("ha-entity-picker");
+        picker.hass = this._hass;
+        if (this._config) {
+            picker.value = this._config.entity;
+        }
+        picker.addEventListener("change", this._valueChanged.bind(this));
+    }
+
+    _valueChanged(ev) {
+        if (!this._hass) return;
+        const target = ev.target;
+        if (this._config && this._config.entity === target.value) return;
+
+        this._config = {
+            ...this._config,
+            entity: target.value,
+        };
+
+        const event = new CustomEvent("config-changed", {
+            detail: { config: this._config },
+            bubbles: true,
+            composed: true,
+        });
+        this.dispatchEvent(event);
+    }
+}
+
+customElements.define("tan-nantes-card-editor", TanNantesCardEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push({

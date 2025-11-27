@@ -1,0 +1,21 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Tan Nantes Configuration",
+                "description": "Enter your GPS coordinates to find the nearest stop.",
+                "data": {
+                    "latitude": "Latitude",
+                    "longitude": "Longitude"
+                }
+            }
+        },
+        "error": {
+            "no_stops_found": "No stops found nearby.",
+            "unknown": "Unexpected error."
+        },
+        "abort": {
+            "already_configured": "Device is already configured"
+        }
+    }
+}
