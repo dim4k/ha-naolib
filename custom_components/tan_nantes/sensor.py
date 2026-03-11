@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -27,17 +28,17 @@ async def async_setup_entry(
 
     # Coordinator to manage updates (every 60s)
     coordinator = TanDataCoordinator(hass, stop_code)
-    
+
     # Register coordinator for WS access
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN].setdefault("coordinators", {})
     hass.data[DOMAIN]["coordinators"][stop_code] = coordinator
-    
+
     await coordinator.async_config_entry_first_refresh()
 
     # Create a main sensor
     async_add_entities([
-        TanNextDeparturesSensor(coordinator, stop_name),
+        TanNextDeparturesSensor(coordinator, stop_name or stop_code),
     ], True)
 
 class TanNextDeparturesSensor(CoordinatorEntity, SensorEntity):
@@ -56,14 +57,16 @@ class TanNextDeparturesSensor(CoordinatorEntity, SensorEntity):
         """Return the time of the very first bus."""
         data = self.coordinator.data
         passages = data.get("next_departures", []) if data else []
-        
-        if passages and len(passages) > 0:
+
+        if passages:
             return passages[0].get("time", "Indisponible")
         return "No bus"
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
-        """Return all next passages as attributes."""
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return next passages and stop code as attributes."""
+        data = self.coordinator.data or {}
         return {
-            "stop_code": self.coordinator.stop_code
+            "stop_code": self.coordinator.stop_code,
+            "next_departures": data.get("next_departures", []),
         }

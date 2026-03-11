@@ -2,7 +2,6 @@ import logging
 import asyncio
 from typing import Any, Optional
 import aiohttp
-import async_timeout
 
 from .const import URL_STOPS, URL_WAITING_TIME, URL_STOP_SCHEDULE
 
@@ -33,7 +32,7 @@ class TanApiClient:
     async def _api_wrapper(self, url: str) -> Any:
         """Execute the API request."""
         try:
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 async with self._session.get(url) as response:
                     response.raise_for_status()
                     return await response.json()

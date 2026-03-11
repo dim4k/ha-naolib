@@ -1,11 +1,11 @@
 import asyncio
-from datetime import timedelta, datetime
+from datetime import timedelta
 import logging
-import async_timeout
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .api import TanApiClient
@@ -25,7 +25,7 @@ class TanDataCoordinator(DataUpdateCoordinator):
         )
         self.stop_code = stop_code
         self.api = TanApiClient(async_get_clientsession(hass))
-        self._schedules = {}
+        self._schedules: dict[tuple[str, str, int], dict] = {}
         self._last_schedule_date = None
 
     async def _async_update_data(self) -> dict:
@@ -33,15 +33,13 @@ class TanDataCoordinator(DataUpdateCoordinator):
         try:
             data = await self.api.get_waiting_time(self.stop_code)
             if not data:
-                # If data is None or empty list, it might mean no bus or error.
-                # If it's None (error in api), api wrapper returns None.
-                # If it's empty list, it means no waiting time.
+                # If data is None (API error), raise. If empty list, no buses.
                 if data is None:
-                     raise UpdateFailed("Error fetching data from Tan API")
+                    raise UpdateFailed("Error fetching data from Tan API")
                 return {"next_departures": [], "schedules": {}}
-            
+
             # Manage schedules cache (clear daily)
-            now = datetime.now()
+            now = dt_util.now()
             if self._last_schedule_date != now.date():
                 self._schedules = {}
                 self._last_schedule_date = now.date()
@@ -54,7 +52,7 @@ class TanDataCoordinator(DataUpdateCoordinator):
                 stop_id = passage.get("arret", {}).get("codeArret")
                 line_num = passage.get("ligne", {}).get("numLigne")
                 direction = passage.get("sens")
-                
+
                 if stop_id and line_num and direction:
                     key = (stop_id, line_num, direction)
                     if key not in self._schedules:
@@ -69,51 +67,52 @@ class TanDataCoordinator(DataUpdateCoordinator):
                         self._schedules[key] = result
 
             # Enrich data with traffic info from schedules and prepare for frontend
-            final_schedules = {}
+            final_schedules: dict[str, dict] = {}
             next_departures = []
-            
+
             for passage in data:
                 stop_id = passage.get("arret", {}).get("codeArret")
                 line_num = passage.get("ligne", {}).get("numLigne")
                 direction = passage.get("sens")
                 key = (stop_id, line_num, direction)
-                
-                # Default values
-                passage["infotrafic"] = False
-                passage["infotrafic_message"] = None
+
+                # Read traffic info from API response before any override
+                has_traffic_info = bool(passage.get("infotrafic"))
+                traffic_message = None
+                traffic_type = "alert"
 
                 if key in self._schedules:
                     sched = self._schedules[key]
-                    
-                    # Traffic info
-                    if passage.get("infotrafic"):
+
+                    # Traffic info: enrich with message from schedule if flagged by API
+                    if has_traffic_info:
                         msg = sched.get("ligne", {}).get("libelleTrafic")
                         if msg:
-                            passage["infotrafic_message"] = msg
-                            passage["infotrafic_type"] = "alert"
-                    
+                            traffic_message = msg
+
                     # Prepare schedule for frontend
                     if sched.get("horaires"):
                         # Compress horaires to { "HH": ["mm", "mm"] } to save space
-                        compressed_horaires = {}
-                        for h in sched.get("horaires", []):
-                            if "heure" in h and "passages" in h:
-                                compressed_horaires[h["heure"]] = h["passages"]
+                        compressed_horaires = {
+                            h["heure"]: h["passages"]
+                            for h in sched.get("horaires", [])
+                            if "heure" in h and "passages" in h
+                        }
 
-                        sched_data = {
+                        sched_data: dict = {
                             "horaires": compressed_horaires,
                             "ligne": {
                                 "numLigne": sched.get("ligne", {}).get("numLigne"),
-                                "direction": sched.get("ligne", {}).get("direction")
-                            }
+                                "direction": sched.get("ligne", {}).get("direction"),
+                            },
                         }
-                        
+
                         dir_key = f"directionSens{direction}"
                         if "ligne" in sched and dir_key in sched["ligne"]:
                             sched_data["direction_label"] = sched["ligne"][dir_key]
                         else:
                             sched_data["direction_label"] = f"Sens {direction}"
-                            
+
                         final_schedules[f"{line_num}-{direction}"] = sched_data
 
                 # Prepare next departures
@@ -124,14 +123,16 @@ class TanDataCoordinator(DataUpdateCoordinator):
                     "destination": passage.get("terminus"),
                     "time": passage.get("temps"),
                     "direction": passage.get("sens"),
-                    "traffic_info": passage.get("infotrafic"),
-                    "traffic_message": passage.get("infotrafic_message"),
-                    "traffic_type": passage.get("infotrafic_type", "alert")
+                    "traffic_info": has_traffic_info,
+                    "traffic_message": traffic_message,
+                    "traffic_type": traffic_type,
                 })
 
             return {
                 "next_departures": next_departures,
-                "schedules": final_schedules
+                "schedules": final_schedules,
             }
+        except UpdateFailed:
+            raise
         except Exception as err:
-            raise UpdateFailed(f"Error communicating with API: {err}")
+            raise UpdateFailed(f"Error communicating with API: {err}") from err
