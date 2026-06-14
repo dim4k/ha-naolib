@@ -9,15 +9,17 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    CONF_QUAYS,
     CONF_STOP_CODE,
     CONF_STOP_LABEL,
     DOMAIN,
     STATE_NO_BUS,
     STATE_UNAVAILABLE,
 )
-from .coordinator import TanDataCoordinator
+from .coordinator import TanGlobalCoordinator, build_stop_data
 
 _LOGGER = logging.getLogger(__name__)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -25,42 +27,52 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensors based on the config entry."""
-    # Handle backward compatibility for existing entries
-    stop_code = entry.data.get(CONF_STOP_CODE) or entry.data.get("code_lieu")
-    stop_name = entry.data.get(CONF_STOP_LABEL) or entry.data.get("libelle")
+    coordinator: TanGlobalCoordinator = entry.runtime_data
+    stop_code = entry.data.get(CONF_STOP_CODE)
+    stop_name = entry.data.get(CONF_STOP_LABEL) or stop_code
+    quays = entry.data.get(CONF_QUAYS, [])
 
-    coordinator: TanDataCoordinator = entry.runtime_data
+    async_add_entities(
+        [TanNextDeparturesSensor(coordinator, stop_code, stop_name, quays)]
+    )
 
-    # Create a main sensor
-    async_add_entities([
-        TanNextDeparturesSensor(coordinator, stop_name or stop_code),
-    ], True)
 
-class TanNextDeparturesSensor(CoordinatorEntity, SensorEntity):
+class TanNextDeparturesSensor(CoordinatorEntity[TanGlobalCoordinator], SensorEntity):
     """Represent the next bus at the stop."""
 
     _attr_has_entity_name = False
 
-    def __init__(self, coordinator: TanDataCoordinator, stop_name: str) -> None:
+    def __init__(
+        self,
+        coordinator: TanGlobalCoordinator,
+        stop_code: str,
+        stop_name: str,
+        quays: list[str],
+    ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
+        self._stop_code = stop_code
         self._stop_name = stop_name
-        self._attr_unique_id = f"tan_{coordinator.stop_code}_next"
+        self._quays = quays
+        self._attr_unique_id = f"tan_{stop_code}_next"
         self._attr_name = f"Tan Next - {stop_name}"
         self._attr_icon = "mdi:bus-clock"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.stop_code)},
+            identifiers={(DOMAIN, stop_code)},
             name=f"Arrêt {stop_name}",
             manufacturer="TAN",
             model="Arrêt",
         )
 
+    def _stop_data(self) -> dict[str, Any]:
+        """Build the per-stop payload from the shared network data."""
+        network = self.coordinator.data or {}
+        return build_stop_data(network, self._quays)
+
     @property
     def native_value(self) -> str:
         """Return the time of the very first bus."""
-        data = self.coordinator.data
-        passages = data.get("next_departures", []) if data else []
-
+        passages = self._stop_data().get("next_departures", [])
         if passages:
             return passages[0].get("time", STATE_UNAVAILABLE)
         return STATE_NO_BUS
@@ -68,8 +80,7 @@ class TanNextDeparturesSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return next passages and stop code as attributes."""
-        data = self.coordinator.data or {}
         return {
-            "stop_code": self.coordinator.stop_code,
-            "next_departures": data.get("next_departures", []),
+            "stop_code": self._stop_code,
+            "next_departures": self._stop_data().get("next_departures", []),
         }

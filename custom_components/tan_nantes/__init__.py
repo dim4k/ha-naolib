@@ -1,23 +1,26 @@
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.loader import async_get_integration
 from homeassistant.components import websocket_api
 import voluptuous as vol
 from .const import (
+    CONF_QUAYS,
     CONF_STOP_CODE,
+    CONF_STOP_LABEL,
     CONF_UPDATE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     PLATFORMS,
 )
-from .coordinator import TanDataCoordinator
+from .coordinator import TanGlobalCoordinator, build_stop_data
 import logging
 
 _LOGGER = logging.getLogger(__name__)
 
-# Type alias for an entry carrying its coordinator as runtime data.
-type TanConfigEntry = ConfigEntry[TanDataCoordinator]
+# Type alias for an entry carrying the shared coordinator as runtime data.
+type TanConfigEntry = ConfigEntry[TanGlobalCoordinator]
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:
@@ -68,16 +71,16 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
 
 async def async_setup_entry(hass: HomeAssistant, entry: TanConfigEntry) -> bool:
     """Set up the integration from a config entry."""
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN].setdefault("coordinators", {})
+    data = hass.data.setdefault(DOMAIN, {})
+    data.setdefault("stops", {})
 
     # Register static path, JS and WS command only once
-    if not hass.data[DOMAIN].get("js_registered"):
+    if not data.get("js_registered"):
         await _async_register_frontend(hass)
-        hass.data[DOMAIN]["js_registered"] = True
+        data["js_registered"] = True
 
-    # Resolve stop code (with backward compatibility for legacy keys)
-    stop_code = entry.data.get(CONF_STOP_CODE) or entry.data.get("code_lieu")
+    stop_code = entry.data.get(CONF_STOP_CODE)
+    quays = entry.data.get(CONF_QUAYS)
     if not stop_code:
         _LOGGER.error("Stop code missing from configuration")
         return False
@@ -86,13 +89,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: TanConfigEntry) -> bool:
     if entry.unique_id is None:
         hass.config_entries.async_update_entry(entry, unique_id=stop_code)
 
-    update_interval = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
-    coordinator = TanDataCoordinator(hass, stop_code, int(update_interval))
-    await coordinator.async_config_entry_first_refresh()
+    if not quays:
+        _LOGGER.warning(
+            "Stop '%s' has no quays; please re-add it (the stop identifiers "
+            "changed with the new Naolib API)",
+            stop_code,
+        )
 
-    # Expose the coordinator via runtime_data and a WS-accessible registry
+    # Single shared coordinator polls the whole network for all stops
+    coordinator: TanGlobalCoordinator = data.get("coordinator")
+    if coordinator is None:
+        coordinator = TanGlobalCoordinator(hass)
+        data["coordinator"] = coordinator
+
+    update_interval = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
+    coordinator.set_interval(entry.entry_id, int(update_interval))
+
+    if coordinator.data is None:
+        await coordinator.async_refresh()
+        if not coordinator.last_update_success:
+            raise ConfigEntryNotReady("Unable to fetch initial Naolib data")
+
     entry.runtime_data = coordinator
-    hass.data[DOMAIN]["coordinators"][stop_code] = coordinator
+    data["stops"][stop_code] = {
+        "quays": quays or [],
+        "name": entry.data.get(CONF_STOP_LABEL) or stop_code,
+    }
 
     # Reload the entry when its options change
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -114,23 +136,32 @@ async def _async_update_listener(hass: HomeAssistant, entry: TanConfigEntry) -> 
 def handle_get_data(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     """Handle get data command."""
     stop_code = msg["stop_code"]
-    coordinator = hass.data[DOMAIN]["coordinators"].get(stop_code)
+    domain_data = hass.data.get(DOMAIN, {})
+    coordinator: TanGlobalCoordinator = domain_data.get("coordinator")
+    stop = domain_data.get("stops", {}).get(stop_code)
 
-    if not coordinator:
-        connection.send_error(msg["id"], "stop_not_found", f"Stop code {stop_code} not found")
+    if not coordinator or stop is None:
+        connection.send_error(
+            msg["id"], "stop_not_found", f"Stop code {stop_code} not found"
+        )
         return
 
-    data = coordinator.data or {}
+    payload = build_stop_data(coordinator.data or {}, stop["quays"])
+    connection.send_result(msg["id"], payload)
 
-    connection.send_result(msg["id"], {
-        "next_departures": data.get("next_departures", []),
-        "schedules": data.get("schedules", {})
-    })
 
 async def async_unload_entry(hass: HomeAssistant, entry: TanConfigEntry) -> bool:
     """Unload the integration and clean up resources."""
-    stop_code = entry.data.get(CONF_STOP_CODE) or entry.data.get("code_lieu")
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unloaded and stop_code:
-        hass.data[DOMAIN]["coordinators"].pop(stop_code, None)
+    if unloaded:
+        data = hass.data[DOMAIN]
+        stop_code = entry.data.get(CONF_STOP_CODE)
+        if stop_code:
+            data["stops"].pop(stop_code, None)
+        coordinator: TanGlobalCoordinator = data.get("coordinator")
+        if coordinator is not None:
+            coordinator.remove_interval(entry.entry_id)
+        # Drop the shared coordinator once no stop remains
+        if not data["stops"]:
+            data.pop("coordinator", None)
     return unloaded
