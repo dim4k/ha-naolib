@@ -91,6 +91,13 @@ class TanApiClient:
                 ) as response:
                     response.raise_for_status()
                     payload = await response.read()
+        except aiohttp.ClientResponseError as exception:
+            if exception.status == 429:
+                # The public endpoint allows one request every 30 seconds.
+                _LOGGER.debug("Naolib SIRI rate limit hit (429), will retry")
+            else:
+                _LOGGER.error("Error fetching SIRI data: %s", exception)
+            return None
         except (aiohttp.ClientError, asyncio.TimeoutError) as exception:
             _LOGGER.error("Error fetching SIRI data: %s", exception)
             return None

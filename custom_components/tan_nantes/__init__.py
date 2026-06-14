@@ -1,7 +1,6 @@
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.loader import async_get_integration
 from homeassistant.components import websocket_api
 import voluptuous as vol
@@ -101,14 +100,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: TanConfigEntry) -> bool:
     if coordinator is None:
         coordinator = TanGlobalCoordinator(hass)
         data["coordinator"] = coordinator
+        # Kick off an initial fetch in the background. The endpoint is
+        # rate-limited (1 request / 30 s), so we must not fail or retry the
+        # whole setup on a transient 429 — the coordinator will keep polling.
+        entry.async_create_background_task(
+            hass, coordinator.async_refresh(), "tan_nantes_initial_refresh"
+        )
 
     update_interval = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
     coordinator.set_interval(entry.entry_id, int(update_interval))
-
-    if coordinator.data is None:
-        await coordinator.async_refresh()
-        if not coordinator.last_update_success:
-            raise ConfigEntryNotReady("Unable to fetch initial Naolib data")
 
     entry.runtime_data = coordinator
     data["stops"][stop_code] = {
