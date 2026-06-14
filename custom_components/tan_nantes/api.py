@@ -2,9 +2,8 @@ import logging
 import asyncio
 from typing import Any, Optional
 import aiohttp
-import async_timeout
 
-from .const import URL_STOPS, URL_WAITING_TIME, URL_STOP_SCHEDULE
+from .const import API_TIMEOUT, URL_STOPS, URL_WAITING_TIME, URL_STOP_SCHEDULE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,13 +32,13 @@ class TanApiClient:
     async def _api_wrapper(self, url: str) -> Any:
         """Execute the API request."""
         try:
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(API_TIMEOUT):
                 async with self._session.get(url) as response:
                     response.raise_for_status()
                     return await response.json()
         except (aiohttp.ClientError, asyncio.TimeoutError) as exception:
             _LOGGER.error("Error fetching data from %s: %s", url, exception)
             return None
-        except Exception as exception:
-            _LOGGER.error("Unexpected error connecting to Tan API: %s", exception)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Unexpected error connecting to Tan API at %s", url)
             return None

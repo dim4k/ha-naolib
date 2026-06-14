@@ -3,10 +3,16 @@
         "step": {
             "user": {
                 "title": "Configuration Tan Nantes",
-                "description": "Entrez vos coordonnées GPS pour trouver l'arrêt le plus proche.",
+                "description": "Choisissez une position sur la carte pour rechercher les arrêts à proximité.",
                 "data": {
-                    "latitude": "Latitude",
-                    "longitude": "Longitude"
+                    "location": "Position"
+                }
+            },
+            "select_stop": {
+                "title": "Choix de l'arrêt",
+                "description": "Sélectionnez l'arrêt à suivre.",
+                "data": {
+                    "stop_code": "Arrêt"
                 }
             }
         },
@@ -15,7 +21,20 @@
             "unknown": "Erreur inattendue."
         },
         "abort": {
-            "already_configured": "L'appareil est déjà configuré"
+            "already_configured": "Cet arrêt est déjà configuré.",
+            "reconfigure_successful": "Arrêt mis à jour avec succès."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Options Tan Nantes",
+                "description": "Réglez la fréquence de rafraîchissement des données.",
+                "data": {
+                    "update_interval": "Intervalle de mise à jour (secondes)"
+                }
+            }
         }
     }
 }
+

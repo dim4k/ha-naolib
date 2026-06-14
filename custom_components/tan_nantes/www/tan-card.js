@@ -27,20 +27,20 @@ class TanNantesCard extends HTMLElement {
             );
             if (found) {
                 entityId = found;
-                // Update config to persist the found entity
-                this.config = { ...this.config, entity: entityId };
             }
         }
 
         if (!this.content) this._initShadowDom();
         if (!entityId) {
-            this.content.innerHTML = `<div class="no-bus" style="padding: 16px;">No Tan Nantes entities found. Please add the integration via Settings > Devices & Services.</div>`;
+            this._isError = true;
+            this.content.innerHTML = `<div class="no-bus" style="padding: 16px;">No Tan Nantes entities found. Please add the integration via Settings > Devices &amp; Services.</div>`;
             return;
         }
 
         const state = hass.states[entityId];
 
         if (!state) {
+            this._isError = true;
             this.content.innerHTML = `<div class="no-bus">Entity not found: ${entityId}</div>`;
             return;
         }
@@ -54,20 +54,22 @@ class TanNantesCard extends HTMLElement {
             return;
 
         this._state = state;
+        this._isError = false;
 
         this._updateTitle(state.attributes.friendly_name);
 
         // Fetch data via WebSocket
         const stopCode = state.attributes.stop_code;
         if (stopCode) {
-            // Show loading if we are switching entities or recovering from error
-            if (
-                !this._data ||
-                this.content.innerHTML.includes("No Tan Nantes") ||
-                this.content.innerHTML.includes("Entity not found")
-            ) {
+            // Show loading only on first load or after an error
+            if (!this._data || this._isError) {
+                this._isLoading = true;
                 this.content.innerHTML = `<div class="no-bus">Chargement...</div>`;
             }
+
+            // Prevent concurrent WS calls
+            if (this._fetching) return;
+            this._fetching = true;
 
             hass.callWS({
                 type: "tan_nantes/get_data",
@@ -75,13 +77,20 @@ class TanNantesCard extends HTMLElement {
             })
                 .then((data) => {
                     this._data = data;
+                    this._isLoading = false;
                     this._render();
                 })
                 .catch((err) => {
                     console.error("Error fetching Tan data:", err);
+                    this._isError = true;
+                    this._isLoading = false;
                     this.content.innerHTML = `<div class="no-bus">Erreur de chargement: ${err.message}</div>`;
+                })
+                .finally(() => {
+                    this._fetching = false;
                 });
         } else {
+            this._isError = true;
             this.content.innerHTML = `<div class="no-bus">Entité non configurée (stop_code manquant)</div>`;
         }
     }
@@ -143,11 +152,19 @@ class TanNantesCard extends HTMLElement {
             );
         }
 
+        const hasDir1 = departures.some((p) => p.direction === 1 && p.time);
+        const hasDir2 = departures.some((p) => p.direction === 2 && p.time);
+
+        const dir1Html = hasDir1
+            ? `<div class="direction-header">Direction 1</div>${this._renderRows(departures, 1)}`
+            : "";
+        const dir2Html = hasDir2
+            ? `<div class="direction-header">Direction 2</div>${this._renderRows(departures, 2)}`
+            : "";
+
         return `
-            <div class="direction-header">Direction 1</div>
-            ${this._renderRows(departures, 1)}
-            <div class="direction-header">Direction 2</div>
-            ${this._renderRows(departures, 2)}
+            ${dir1Html}
+            ${dir2Html}
             ${this._renderFooter(stopCode)}
         `;
     }
