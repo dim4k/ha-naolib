@@ -1,161 +1,154 @@
-import asyncio
-from datetime import timedelta
+"""Shared real-time coordinator and per-stop formatting for Tan Nantes.
+
+A single :class:`TanGlobalCoordinator` polls the whole Naolib network once per
+update interval and stores every departure indexed by quay. Each configured
+stop then filters and formats the departures it cares about locally, so the
+rate-limited endpoint is hit only once regardless of how many stops are set up.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .const import DEFAULT_UPDATE_INTERVAL, DOMAIN
 from .api import TanApiClient
+from .const import DEFAULT_UPDATE_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-# A schedule cache key: (codeArret, numLigne, sens)
-ScheduleKey = tuple[str, str, int]
+# Map SIRI VehicleMode to the legacy line type used by the frontend card
+# (1=tram, 2=busway, 3=bus, 4=navibus/ferry).
+_VEHICLE_TYPE = {"tram": 1, "bus": 3, "ferry": 4}
+
+# Map SIRI DirectionName (aller/retour) to the legacy 1/2 direction.
+_DIRECTION = {"A": 1, "R": 2}
 
 
-class TanDataCoordinator(DataUpdateCoordinator):
-    """Manage API data retrieval."""
+class TanGlobalCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any]]]]):
+    """Poll the whole network and index departures by quay."""
 
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        stop_code: str,
-        update_interval: int = DEFAULT_UPDATE_INTERVAL,
-    ) -> None:
-        """Initialize the coordinator."""
+    def __init__(self, hass: HomeAssistant) -> None:
+        """Initialize the shared coordinator."""
         super().__init__(
             hass,
             _LOGGER,
-            name=f"{DOMAIN}_{stop_code}",
-            update_interval=timedelta(seconds=update_interval),
+            name=f"{DOMAIN}_global",
+            update_interval=timedelta(seconds=DEFAULT_UPDATE_INTERVAL),
         )
-        self.stop_code = stop_code
         self.api = TanApiClient(async_get_clientsession(hass))
-        self._schedules: dict[ScheduleKey, dict] = {}
-        self._last_schedule_date = None
+        self._intervals: dict[str, int] = {}
 
-    @staticmethod
-    def _extract_key(passage: dict[str, Any]) -> Optional[ScheduleKey]:
-        """Build the schedule cache key for a passage, or None if incomplete."""
-        stop_id = passage.get("arret", {}).get("codeArret")
-        line_num = passage.get("ligne", {}).get("numLigne")
-        direction = passage.get("sens")
-        if stop_id and line_num and direction:
-            return (stop_id, line_num, direction)
-        return None
+    def set_interval(self, entry_id: str, seconds: int) -> None:
+        """Register an entry's desired update interval (shortest wins)."""
+        self._intervals[entry_id] = seconds
+        self._apply_interval()
 
-    def _reset_cache_if_stale(self) -> None:
-        """Clear the schedule cache once per day."""
-        today = dt_util.now().date()
-        if self._last_schedule_date != today:
-            self._schedules = {}
-            self._last_schedule_date = today
+    def remove_interval(self, entry_id: str) -> None:
+        """Drop an entry's update interval."""
+        self._intervals.pop(entry_id, None)
+        self._apply_interval()
 
-    async def _fetch_missing_schedules(self, keys: set[ScheduleKey]) -> None:
-        """Fetch and cache schedules that are not yet known."""
-        missing = [key for key in keys if key not in self._schedules]
-        if not missing:
-            return
+    def _apply_interval(self) -> None:
+        """Use the shortest requested interval across all stops."""
+        seconds = min(self._intervals.values(), default=DEFAULT_UPDATE_INTERVAL)
+        self.update_interval = timedelta(seconds=seconds)
 
-        results = await asyncio.gather(
-            *(self.api.get_stop_schedule(*key) for key in missing),
-            return_exceptions=True,
-        )
-        for key, result in zip(missing, results):
-            if isinstance(result, dict):
-                self._schedules[key] = result
+    async def _async_update_data(self) -> dict[str, list[dict[str, Any]]]:
+        """Fetch the whole network once."""
+        data = await self.api.async_get_all_departures()
+        if data is None:
+            raise UpdateFailed("Error fetching data from the Naolib SIRI API")
+        return data
 
-    def _build_schedule_entry(self, key: ScheduleKey) -> Optional[dict]:
-        """Build the frontend schedule payload for a given key."""
-        sched = self._schedules.get(key)
-        if not sched or not sched.get("horaires"):
-            return None
 
-        _, line_num, direction = key
+def _humanize(delta_seconds: float) -> str:
+    """Format a time delta the way the frontend card expects."""
+    if delta_seconds <= 60:
+        return "proche"
+    minutes = int(delta_seconds // 60)
+    if minutes < 60:
+        return f"{minutes} mn"
+    return f"{minutes // 60}h{minutes % 60:02d}"
 
-        # Compress horaires to { "HH": ["mm", "mm"] } to save space
-        compressed_horaires = {
-            h["heure"]: h["passages"]
-            for h in sched.get("horaires", [])
-            if "heure" in h and "passages" in h
+
+def _vehicle_type(mode: str | None) -> int:
+    """Map a SIRI VehicleMode to the legacy line type."""
+    return _VEHICLE_TYPE.get((mode or "").lower(), 3)
+
+
+def _direction(direction_name: str | None) -> int:
+    """Map a SIRI DirectionName to the legacy 1/2 direction."""
+    return _DIRECTION.get((direction_name or "").upper(), 1)
+
+
+def build_stop_data(
+    network: dict[str, list[dict[str, Any]]], quays: list[str]
+) -> dict[str, Any]:
+    """Build the per-stop payload (departures + schedules) for the card.
+
+    ``network`` is the global coordinator data keyed by quay; ``quays`` are the
+    quays belonging to the configured stop.
+    """
+    now = dt_util.now()
+    collected: list[tuple[datetime, float, dict[str, Any]]] = []
+
+    for quay in quays:
+        for raw in network.get(quay, []):
+            expected = raw.get("expected")
+            when = dt_util.parse_datetime(expected) if expected else None
+            if when is None:
+                continue
+            delta = (when - now).total_seconds()
+            if delta < -60:
+                continue
+            collected.append((when, delta, raw))
+
+    collected.sort(key=lambda item: item[0])
+
+    next_departures = [
+        {
+            "line": raw.get("line"),
+            "type": _vehicle_type(raw.get("vehicle_mode")),
+            "destination": raw.get("destination"),
+            "time": _humanize(delta),
+            "direction": _direction(raw.get("direction_name")),
+            "traffic_info": False,
+            "traffic_message": None,
         }
+        for _when, delta, raw in collected
+    ]
 
-        dir_key = f"directionSens{direction}"
-        direction_label = sched.get("ligne", {}).get(dir_key) or f"Sens {direction}"
+    return {
+        "next_departures": next_departures,
+        "schedules": _build_schedules(collected),
+    }
 
-        return {
-            "horaires": compressed_horaires,
-            "ligne": {
-                "numLigne": sched.get("ligne", {}).get("numLigne"),
-                "direction": sched.get("ligne", {}).get("direction"),
+
+def _build_schedules(
+    collected: list[tuple[datetime, float, dict[str, Any]]],
+) -> dict[str, dict[str, Any]]:
+    """Group upcoming departures by line/direction for the schedule view."""
+    schedules: dict[str, dict[str, Any]] = {}
+    for when, _delta, raw in collected:
+        line = raw.get("line")
+        direction = _direction(raw.get("direction_name"))
+        destination = raw.get("destination")
+        key = f"{line}-{direction}"
+        entry = schedules.setdefault(
+            key,
+            {
+                "ligne": {"numLigne": line, "direction": destination},
+                "direction_label": destination or f"Sens {direction}",
+                "horaires": {},
             },
-            "direction_label": direction_label,
-        }
-
-    def _traffic_message(self, key: ScheduleKey, has_traffic_info: bool) -> Optional[str]:
-        """Return the traffic message from the cached schedule, if any."""
-        if not has_traffic_info:
-            return None
-        sched = self._schedules.get(key)
-        if not sched:
-            return None
-        return sched.get("ligne", {}).get("libelleTrafic") or None
-
-    async def _async_update_data(self) -> dict:
-        """Retrieve data from the Tan API."""
-        try:
-            data = await self.api.get_waiting_time(self.stop_code)
-            if data is None:
-                raise UpdateFailed("Error fetching data from Tan API")
-            if not data:
-                # Empty list: no buses scheduled.
-                return {"next_departures": [], "schedules": {}}
-
-            self._reset_cache_if_stale()
-
-            # Single pass: pair each passage with its (optional) key.
-            keyed = [(passage, self._extract_key(passage)) for passage in data]
-
-            # Fetch any schedules we don't have cached yet.
-            await self._fetch_missing_schedules(
-                {key for _, key in keyed if key is not None}
-            )
-
-            next_departures = []
-            schedules: dict[str, dict] = {}
-
-            for passage, key in keyed:
-                has_traffic_info = bool(passage.get("infotrafic"))
-                traffic_message = (
-                    self._traffic_message(key, has_traffic_info) if key else None
-                )
-
-                if key is not None:
-                    entry = self._build_schedule_entry(key)
-                    if entry is not None:
-                        _, line_num, direction = key
-                        schedules[f"{line_num}-{direction}"] = entry
-
-                line_info = passage.get("ligne", {})
-                next_departures.append({
-                    "line": line_info.get("numLigne"),
-                    "type": line_info.get("typeLigne"),
-                    "destination": passage.get("terminus"),
-                    "time": passage.get("temps"),
-                    "direction": passage.get("sens"),
-                    "traffic_info": has_traffic_info,
-                    "traffic_message": traffic_message,
-                })
-
-            return {
-                "next_departures": next_departures,
-                "schedules": schedules,
-            }
-        except UpdateFailed:
-            raise
-        except Exception as err:
-            raise UpdateFailed(f"Error communicating with API: {err}") from err
+        )
+        entry["horaires"].setdefault(when.strftime("%H"), []).append(
+            when.strftime("%M")
+        )
+    return schedules

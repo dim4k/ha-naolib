@@ -7,7 +7,6 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     LocationSelector,
     NumberSelector,
@@ -18,9 +17,9 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
 )
 
-from .api import TanApiClient
 from .const import (
     CONF_LOCATION,
+    CONF_QUAYS,
     CONF_STOP_CODE,
     CONF_STOP_LABEL,
     CONF_UPDATE_INTERVAL,
@@ -29,6 +28,7 @@ from .const import (
     MAX_UPDATE_INTERVAL,
     MIN_UPDATE_INTERVAL,
 )
+from .stops import nearby_stops
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,12 +42,6 @@ class TanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self._stops: list[dict[str, Any]] = []
 
-    async def _async_fetch_stops(self, lat: float, lon: float) -> list[dict[str, Any]]:
-        """Fetch nearby stops for the given coordinates."""
-        session = async_get_clientsession(self.hass)
-        client = TanApiClient(session)
-        return await client.get_stops(lat, lon) or []
-
     async def async_step_user(
         self, user_input: Optional[dict[str, Any]] = None
     ) -> FlowResult:
@@ -59,16 +53,13 @@ class TanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             lat = location["latitude"]
             lon = location["longitude"]
 
-            try:
-                self._stops = await self._async_fetch_stops(lat, lon)
-            except Exception:  # noqa: BLE001
-                _LOGGER.exception("Unexpected exception while fetching stops")
-                errors["base"] = "unknown"
+            self._stops = await self.hass.async_add_executor_job(
+                nearby_stops, lat, lon
+            )
+            if not self._stops:
+                errors["base"] = "no_stops_found"
             else:
-                if not self._stops:
-                    errors["base"] = "no_stops_found"
-                else:
-                    return await self.async_step_select_stop()
+                return await self.async_step_select_stop()
 
         default_location = {
             "latitude": self.hass.config.latitude,
@@ -98,15 +89,14 @@ class TanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the second step: choose a stop among the nearby ones."""
         if user_input is not None:
             stop_code = user_input[CONF_STOP_CODE]
-            stop = next(
-                (s for s in self._stops if s["codeLieu"] == stop_code),
-                None,
-            )
-            stop_label = stop["libelle"] if stop else stop_code
+            stop = next((s for s in self._stops if s["id"] == stop_code), None)
+            stop_label = stop["name"] if stop else stop_code
+            quays = stop["quays"] if stop else []
 
             data = {
                 CONF_STOP_CODE: stop_code,
                 CONF_STOP_LABEL: stop_label,
+                CONF_QUAYS: quays,
             }
 
             await self.async_set_unique_id(stop_code)
@@ -136,8 +126,8 @@ class TanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         options = [
             {
-                "value": stop["codeLieu"],
-                "label": stop["libelle"],
+                "value": stop["id"],
+                "label": f"{stop['name']} ({stop['distance']} m)",
             }
             for stop in self._stops
         ]
