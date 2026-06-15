@@ -3,11 +3,11 @@
     "name": "Naolib Nantes",
     "codeowners": ["@dim4k"],
     "config_flow": true,
-    "dependencies": ["http"],
+    "dependencies": ["http", "frontend"],
     "documentation": "https://github.com/dim4k/ha-naolib",
     "integration_type": "service",
     "iot_class": "cloud_polling",
     "issue_tracker": "https://github.com/dim4k/ha-naolib/issues",
     "requirements": [],
-    "version": "2.3.2"
+    "version": "2.3.3"
 }

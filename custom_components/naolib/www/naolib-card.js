@@ -422,7 +422,9 @@ class NaolibCard extends HTMLElement {
     }
 }
 
-customElements.define("naolib-card", NaolibCard);
+if (!customElements.get("naolib-card")) {
+    customElements.define("naolib-card", NaolibCard);
+}
 
 class NaolibCardEditor extends HTMLElement {
     setConfig(config) {
@@ -480,13 +482,17 @@ class NaolibCardEditor extends HTMLElement {
     }
 }
 
-customElements.define("naolib-card-editor", NaolibCardEditor);
+if (!customElements.get("naolib-card-editor")) {
+    customElements.define("naolib-card-editor", NaolibCardEditor);
+}
 
 window.customCards = window.customCards || [];
-window.customCards.push({
-    type: "naolib-card",
-    name: "Naolib Nantes",
-    preview: true,
-    description:
-        "Affiche les prochains départs (Bus/Tram) pour un arrêt donné.",
-});
+if (!window.customCards.some((c) => c.type === "naolib-card")) {
+    window.customCards.push({
+        type: "naolib-card",
+        name: "Naolib Nantes",
+        preview: true,
+        description:
+            "Affiche les prochains départs (Bus/Tram) pour un arrêt donné.",
+    });
+}
