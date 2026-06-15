@@ -3,6 +3,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.loader import async_get_integration
 from homeassistant.components import websocket_api
+from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 from .const import (
@@ -24,11 +25,15 @@ _LOGGER = logging.getLogger(__name__)
 type NaolibConfigEntry = ConfigEntry[NaolibGlobalCoordinator]
 
 
-async def _async_register_frontend(hass: HomeAssistant) -> None:
-    """Register the static path, Lovelace resource and WS command once."""
+async def _async_register_frontend(hass: HomeAssistant) -> bool:
+    """Register the static path, Lovelace resource and WS command.
+
+    Returns True if everything was registered, False if Lovelace was not ready
+    and the caller should retry later.
+    """
     data = hass.data.setdefault(DOMAIN, {})
     if data.get("frontend_registered"):
-        return
+        return True
 
     integration = await async_get_integration(hass, DOMAIN)
     version = integration.version
@@ -37,13 +42,16 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     path = hass.config.path("custom_components/naolib/www")
     url_path = "/naolib_static"
 
-    await hass.http.async_register_static_paths([
-        StaticPathConfig(
-            url_path=url_path,
-            path=path,
-            cache_headers=False
-        )
-    ])
+    if not data.get("static_path_registered"):
+        await hass.http.async_register_static_paths([
+            StaticPathConfig(
+                url_path=url_path,
+                path=path,
+                cache_headers=False
+            )
+        ])
+        data["static_path_registered"] = True
+        _LOGGER.info("Registered Naolib static path: %s", url_path)
 
     # 2. Register the card as a Lovelace resource
     # This is only possible when Lovelace runs in "storage" mode (the default,
@@ -51,11 +59,11 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     # user is expected to declare the resource themselves, so we skip silently.
     lovelace = hass.data.get("lovelace")
     if lovelace is None:
-        _LOGGER.debug("Lovelace not available yet, will retry when loaded")
-        return
+        _LOGGER.info("Lovelace not available yet, will retry later")
+        return False
 
     if getattr(lovelace, "mode", None) != "storage":
-        _LOGGER.debug(
+        _LOGGER.info(
             "Lovelace is in YAML mode; add the card resource manually: %s",
             f"{url_path}/naolib-card.js",
         )
@@ -79,18 +87,28 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
                         await resources.async_update_item(
                             resource["id"], {"url": card_url}
                         )
+                        _LOGGER.info("Updated Naolib Lovelace resource to %s", card_url)
+                    else:
+                        _LOGGER.info("Naolib Lovelace resource already up to date: %s", card_url)
                     break
 
             if not found:
                 await resources.async_create_item(
                     {"res_type": "module", "url": card_url}
                 )
+                _LOGGER.info("Registered Naolib Lovelace resource: %s", card_url)
         except Exception as err:  # noqa: BLE001
-            _LOGGER.warning("Could not register Lovelace resource: %s", err)
+            _LOGGER.warning("Could not register Naolib Lovelace resource: %s", err)
+            return False
 
     # 3. Register WebSocket command
-    websocket_api.async_register_command(hass, handle_get_data)
+    if not data.get("websocket_registered"):
+        websocket_api.async_register_command(hass, handle_get_data)
+        data["websocket_registered"] = True
+        _LOGGER.info("Registered Naolib WebSocket command")
+
     data["frontend_registered"] = True
+    return True
 
 
 async def _async_ensure_frontend_registered(hass: HomeAssistant) -> None:
@@ -99,18 +117,26 @@ async def _async_ensure_frontend_registered(hass: HomeAssistant) -> None:
     if data.get("frontend_registered"):
         return
 
-    await _async_register_frontend(hass)
+    success = await _async_register_frontend(hass)
+    if success:
+        return
 
-    if not data.get("frontend_registered") and hass.data.get("lovelace") is None:
-        @callback
-        def _on_lovelace_loaded(event: dict[str, Any]) -> None:
-            if event.get("data", {}).get("component") == "lovelace":
-                hass.async_create_background_task(
-                    _async_register_frontend(hass),
-                    "naolib_register_frontend",
-                )
+    # Lovelace was not ready; schedule retries.
+    @callback
+    def _retry_registration(_now=None) -> None:
+        hass.async_create_background_task(
+            _async_register_frontend(hass),
+            "naolib_register_frontend_retry",
+        )
 
-        hass.bus.async_listen_once("component_loaded", _on_lovelace_loaded)
+    @callback
+    def _on_component_loaded(event: dict[str, Any]) -> None:
+        if event.get("data", {}).get("component") == "lovelace":
+            _retry_registration()
+
+    hass.bus.async_listen_once("component_loaded", _on_component_loaded)
+    async_call_later(hass, 10, _retry_registration)
+    _LOGGER.info("Scheduled Naolib frontend registration retry")
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bool:
