@@ -14,14 +14,14 @@ from .const import (
     DOMAIN,
     PLATFORMS,
 )
-from .coordinator import TanGlobalCoordinator, build_stop_data
+from .coordinator import NaolibGlobalCoordinator, build_stop_data
 from .schedules import build_timetable
 import logging
 
 _LOGGER = logging.getLogger(__name__)
 
 # Type alias for an entry carrying the shared coordinator as runtime data.
-type TanConfigEntry = ConfigEntry[TanGlobalCoordinator]
+type NaolibConfigEntry = ConfigEntry[NaolibGlobalCoordinator]
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:
@@ -30,8 +30,8 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     version = integration.version
 
     # 1. Define the virtual URL path to serve static files
-    path = hass.config.path("custom_components/tan_nantes/www")
-    url_path = "/tan_nantes_static"
+    path = hass.config.path("custom_components/naolib/www")
+    url_path = "/naolib_static"
 
     await hass.http.async_register_static_paths([
         StaticPathConfig(
@@ -51,7 +51,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     elif getattr(lovelace, "mode", None) != "storage":
         _LOGGER.debug(
             "Lovelace is in YAML mode; add the card resource manually: %s",
-            f"{url_path}/tan-card.js",
+            f"{url_path}/naolib-card.js",
         )
     else:
         try:
@@ -62,7 +62,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
             if not resources.loaded:
                 await resources.async_load()
 
-            card_url = f"{url_path}/tan-card.js?hacstag={version}"
+            card_url = f"{url_path}/naolib-card.js?hacstag={version}"
 
             # Check if already registered, update version if needed
             found = False
@@ -86,7 +86,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, handle_get_data)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: TanConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bool:
     """Set up the integration from a config entry."""
     data = hass.data.setdefault(DOMAIN, {})
     data.setdefault("stops", {})
@@ -114,15 +114,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: TanConfigEntry) -> bool:
         )
 
     # Single shared coordinator polls the whole network for all stops
-    coordinator: TanGlobalCoordinator = data.get("coordinator")
+    coordinator: NaolibGlobalCoordinator = data.get("coordinator")
     if coordinator is None:
-        coordinator = TanGlobalCoordinator(hass)
+        coordinator = NaolibGlobalCoordinator(hass)
         data["coordinator"] = coordinator
         # Kick off an initial fetch in the background. The endpoint is
         # rate-limited (1 request / 30 s), so we must not fail or retry the
         # whole setup on a transient 429 — the coordinator will keep polling.
         entry.async_create_background_task(
-            hass, coordinator.async_refresh(), "tan_nantes_initial_refresh"
+            hass, coordinator.async_refresh(), "naolib_initial_refresh"
         )
 
     update_interval = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
@@ -141,13 +141,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: TanConfigEntry) -> bool:
     return True
 
 
-async def _async_update_listener(hass: HomeAssistant, entry: TanConfigEntry) -> None:
+async def _async_update_listener(hass: HomeAssistant, entry: NaolibConfigEntry) -> None:
     """Reload the entry when options are updated."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 
 @websocket_api.websocket_command({
-    vol.Required("type"): "tan_nantes/get_data",
+    vol.Required("type"): "naolib/get_data",
     vol.Required("stop_code"): str,
 })
 @websocket_api.async_response
@@ -155,7 +155,7 @@ async def handle_get_data(hass: HomeAssistant, connection: websocket_api.ActiveC
     """Handle get data command."""
     stop_code = msg["stop_code"]
     domain_data = hass.data.get(DOMAIN, {})
-    coordinator: TanGlobalCoordinator = domain_data.get("coordinator")
+    coordinator: NaolibGlobalCoordinator = domain_data.get("coordinator")
     stop = domain_data.get("stops", {}).get(stop_code)
 
     if not coordinator or stop is None:
@@ -172,7 +172,7 @@ async def handle_get_data(hass: HomeAssistant, connection: websocket_api.ActiveC
     connection.send_result(msg["id"], payload)
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: TanConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bool:
     """Unload the integration and clean up resources."""
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
@@ -180,7 +180,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: TanConfigEntry) -> bool
         stop_code = entry.data.get(CONF_STOP_CODE)
         if stop_code:
             data["stops"].pop(stop_code, None)
-        coordinator: TanGlobalCoordinator = data.get("coordinator")
+        coordinator: NaolibGlobalCoordinator = data.get("coordinator")
         if coordinator is not None:
             coordinator.remove_interval(entry.entry_id)
         # Drop the shared coordinator once no stop remains

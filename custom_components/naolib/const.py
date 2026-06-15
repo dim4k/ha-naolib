@@ -1,6 +1,6 @@
-"""Constants for the Tan Nantes integration."""
+"""Constants for the Naolib integration."""
 
-DOMAIN: str = "tan_nantes"
+DOMAIN: str = "naolib"
 
 # Platforms set up by this integration
 PLATFORMS: list[str] = ["sensor"]
@@ -27,7 +27,7 @@ STATE_UNAVAILABLE: str = "Indisponible"
 # network, which we fetch once and share across all configured stops.
 SIRI_DATASET_ID: str = "NAOLIBORG"
 SIRI_URL: str = f"https://api.okina.fr/gateway/sem/realtime/anshar/services/{SIRI_DATASET_ID}"
-SIRI_REQUESTOR_REF: str = "ha-tan-nantes"
+SIRI_REQUESTOR_REF: str = "ha-naolib"
 SIRI_NAMESPACE: str = "http://www.siri.org.uk/siri"
 
 # Embedded stop index (generated from the GTFS feed by scripts/).

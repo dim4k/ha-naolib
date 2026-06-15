@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the embedded stop index and timetables for the Tan Nantes integration.
+"""Generate the embedded stop index and timetables for the Naolib integration.
 
 The Naolib real-time SIRI API only accepts ``FR_NAOLIB:Quay:*`` identifiers,
 which are published exclusively in the GTFS feed. This script downloads the
@@ -41,7 +41,7 @@ GTFS_DATASET_URL = (
 _DATA_DIR = (
     Path(__file__).resolve().parent.parent
     / "custom_components"
-    / "tan_nantes"
+    / "naolib"
     / "data"
 )
 

@@ -32,8 +32,8 @@ from .stops import nearby_stops
 _LOGGER = logging.getLogger(__name__)
 
 
-class TanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle the config flow for Tan Nantes."""
+class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle the config flow for Naolib."""
 
     VERSION = 1
 
@@ -148,10 +148,10 @@ class TanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         """Return the options flow handler."""
-        return TanOptionsFlow()
+        return NaolibOptionsFlow()
 
 
-class TanOptionsFlow(OptionsFlow):
+class NaolibOptionsFlow(OptionsFlow):
     """Handle options (polling interval)."""
 
     async def async_step_init(

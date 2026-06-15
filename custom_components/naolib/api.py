@@ -53,7 +53,7 @@ def _line_number(line_ref: str | None) -> str | None:
     return line_ref
 
 
-class TanApiClient:
+class NaolibApiClient:
     """Client for the Naolib SIRI StopMonitoring endpoint."""
 
     def __init__(self, session: aiohttp.ClientSession) -> None:
