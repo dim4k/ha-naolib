@@ -261,7 +261,7 @@ class NaolibCard extends HTMLElement {
     _parseTime(timeStr) {
         if (!timeStr) return 9999;
         if (timeStr.includes("proche")) return 0;
-        const match = timeStr.match(/(\d+)(mn|h)/);
+        const match = timeStr.match(/(\d+)\s*(mn|h)/);
         if (!match) return 9999;
         let val = parseInt(match[1]);
         if (match[2] === "h") val *= 60;
