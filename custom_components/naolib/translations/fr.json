@@ -2,7 +2,7 @@
     "config": {
         "step": {
             "user": {
-                "title": "Configuration Tan Nantes",
+                "title": "Configuration Naolib Nantes",
                 "description": "Choisissez une position sur la carte pour rechercher les arrêts à proximité.",
                 "data": {
                     "location": "Position"
@@ -28,7 +28,7 @@
     "options": {
         "step": {
             "init": {
-                "title": "Options Tan Nantes",
+                "title": "Options Naolib Nantes",
                 "description": "Réglez la fréquence de rafraîchissement des données.",
                 "data": {
                     "update_interval": "Intervalle de mise à jour (secondes)"

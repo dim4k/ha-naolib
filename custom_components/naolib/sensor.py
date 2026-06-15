@@ -16,7 +16,7 @@ from .const import (
     STATE_NO_BUS,
     STATE_UNAVAILABLE,
 )
-from .coordinator import TanGlobalCoordinator, build_stop_data
+from .coordinator import NaolibGlobalCoordinator, build_stop_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,17 +27,17 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensors based on the config entry."""
-    coordinator: TanGlobalCoordinator = entry.runtime_data
+    coordinator: NaolibGlobalCoordinator = entry.runtime_data
     stop_code = entry.data.get(CONF_STOP_CODE)
     stop_name = entry.data.get(CONF_STOP_LABEL) or stop_code
     quays = entry.data.get(CONF_QUAYS, [])
 
     async_add_entities(
-        [TanNextDeparturesSensor(coordinator, stop_code, stop_name, quays)]
+        [NaolibNextDeparturesSensor(coordinator, stop_code, stop_name, quays)]
     )
 
 
-class TanNextDeparturesSensor(CoordinatorEntity[TanGlobalCoordinator], SensorEntity):
+class NaolibNextDeparturesSensor(CoordinatorEntity[NaolibGlobalCoordinator], SensorEntity):
     """Represent the next bus at the stop."""
 
     _attr_has_entity_name = True
@@ -45,7 +45,7 @@ class TanNextDeparturesSensor(CoordinatorEntity[TanGlobalCoordinator], SensorEnt
 
     def __init__(
         self,
-        coordinator: TanGlobalCoordinator,
+        coordinator: NaolibGlobalCoordinator,
         stop_code: str,
         stop_name: str,
         quays: list[str],
@@ -55,12 +55,12 @@ class TanNextDeparturesSensor(CoordinatorEntity[TanGlobalCoordinator], SensorEnt
         self._stop_code = stop_code
         self._stop_name = stop_name
         self._quays = quays
-        self._attr_unique_id = f"tan_{stop_code}_next"
+        self._attr_unique_id = f"naolib_{stop_code}_next"
         self._attr_icon = "mdi:bus-clock"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, stop_code)},
             name=f"Arrêt {stop_name}",
-            manufacturer="TAN",
+            manufacturer="Naolib",
             model="Arrêt",
         )
         self._departures: list[dict[str, Any]] = self._build_departures()

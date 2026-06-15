@@ -1,6 +1,6 @@
-// Detect a Tan Nantes sensor by its attributes rather than its entity_id,
+// Detect a Naolib sensor by its attributes rather than its entity_id,
 // so the card keeps working even if the entity is renamed.
-function isTanNantesEntity(state) {
+function isNaolibEntity(state) {
     return (
         !!state &&
         state.attributes.stop_code !== undefined &&
@@ -8,12 +8,12 @@ function isTanNantesEntity(state) {
     );
 }
 
-class TanNantesCard extends HTMLElement {
+class NaolibCard extends HTMLElement {
     static getStubConfig(hass, entities, entitiesFallback) {
-        // Try to find a Tan Nantes sensor by its attributes (not its
+        // Try to find a Naolib sensor by its attributes (not its
         // entity_id), so detection keeps working regardless of naming.
         const entity = Object.keys(hass.states).find((eid) =>
-            isTanNantesEntity(hass.states[eid])
+            isNaolibEntity(hass.states[eid])
         );
         return {
             entity: entity || "",
@@ -21,7 +21,7 @@ class TanNantesCard extends HTMLElement {
     }
 
     static getConfigElement() {
-        return document.createElement("tan-nantes-card-editor");
+        return document.createElement("naolib-card-editor");
     }
 
     setConfig(config) {
@@ -34,7 +34,7 @@ class TanNantesCard extends HTMLElement {
         // Fallback: try to find an entity if none is configured
         if (!entityId) {
             const found = Object.keys(hass.states).find((eid) =>
-                isTanNantesEntity(hass.states[eid])
+                isNaolibEntity(hass.states[eid])
             );
             if (found) {
                 entityId = found;
@@ -44,7 +44,7 @@ class TanNantesCard extends HTMLElement {
         if (!this.content) this._initShadowDom();
         if (!entityId) {
             this._isError = true;
-            this.content.innerHTML = `<div class="no-bus" style="padding: 16px;">No Tan Nantes entities found. Please add the integration via Settings > Devices &amp; Services.</div>`;
+            this.content.innerHTML = `<div class="no-bus" style="padding: 16px;">No Naolib entities found. Please add the integration via Settings > Devices &amp; Services.</div>`;
             return;
         }
 
@@ -85,7 +85,7 @@ class TanNantesCard extends HTMLElement {
             this._fetching = true;
 
             hass.callWS({
-                type: "tan_nantes/get_data",
+                type: "naolib/get_data",
                 stop_code: stopCode,
             })
                 .then((data) => {
@@ -94,7 +94,7 @@ class TanNantesCard extends HTMLElement {
                     this._render();
                 })
                 .catch((err) => {
-                    console.error("Error fetching Tan data:", err);
+                    console.error("Error fetching Naolib data:", err);
                     this._isError = true;
                     this._isLoading = false;
                     this.content.innerHTML = `<div class="no-bus">Erreur de chargement: ${err.message}</div>`;
@@ -110,11 +110,11 @@ class TanNantesCard extends HTMLElement {
     _initShadowDom() {
         this.attachShadow({ mode: "open" });
         this.shadowRoot.innerHTML = `
-            <style>${TanNantesCard.styles}</style>
+            <style>${NaolibCard.styles}</style>
             <ha-card>
                 <div class="card-header">
                     <ha-icon icon="mdi:bus-clock" class="icon"></ha-icon>
-                    <span id="title">Arrêt Tan</span>
+                    <span id="title">Arrêt Naolib</span>
                 </div>
                 <div id="content"></div>
             </ha-card>
@@ -136,7 +136,7 @@ class TanNantesCard extends HTMLElement {
 
     _updateTitle(name) {
         if (this.titleElement)
-            this.titleElement.innerText = name || "Arrêt Tan";
+            this.titleElement.innerText = name || "Arrêt Naolib";
     }
 
     _render() {
@@ -221,9 +221,11 @@ class TanNantesCard extends HTMLElement {
                 const time1 = group.times[0];
                 const time2 = group.times[1]; // Only take the second one if exists
 
-                const isWarning = /(^|\D)[23](mn|')/.test(time1);
-                const isUrgent =
-                    time1.includes("proche") || /(^|\D)1(mn|')/.test(time1);
+                // "proche" or <=1 min => urgent (red), 2-3 min => warning (orange).
+                const isProche = /proche/i.test(time1);
+                const minutes = this._parseTime(time1);
+                const isUrgent = isProche || minutes <= 1;
+                const isWarning = !isUrgent && minutes <= 3;
 
                 const trafficIcon = group.traffic_info
                     ? `<ha-icon icon="mdi:alert-circle" class="traffic-warning" title="${(
@@ -420,9 +422,9 @@ class TanNantesCard extends HTMLElement {
     }
 }
 
-customElements.define("tan-nantes-card", TanNantesCard);
+customElements.define("naolib-card", NaolibCard);
 
-class TanNantesCardEditor extends HTMLElement {
+class NaolibCardEditor extends HTMLElement {
     setConfig(config) {
         this._config = config;
         if (this.content) {
@@ -443,7 +445,7 @@ class TanNantesCardEditor extends HTMLElement {
         this.content.innerHTML = `
             <div class="card-config">
                 <ha-entity-picker
-                    label="Entité (arrêt Tan)"
+                    label="Entité (arrêt Naolib)"
                     domain-filter="sensor"
                     include-domains='["sensor"]'
                 ></ha-entity-picker>
@@ -478,12 +480,12 @@ class TanNantesCardEditor extends HTMLElement {
     }
 }
 
-customElements.define("tan-nantes-card-editor", TanNantesCardEditor);
+customElements.define("naolib-card-editor", NaolibCardEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
-    type: "tan-nantes-card",
-    name: "Tan Nantes",
+    type: "naolib-card",
+    name: "Naolib Nantes",
     preview: true,
     description:
         "Affiche les prochains départs (Bus/Tram) pour un arrêt donné.",

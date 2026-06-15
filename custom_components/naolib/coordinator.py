@@ -1,6 +1,6 @@
-"""Shared real-time coordinator and per-stop formatting for Tan Nantes.
+"""Shared real-time coordinator and per-stop formatting for Naolib.
 
-A single :class:`TanGlobalCoordinator` polls the whole Naolib network once per
+A single :class:`NaolibGlobalCoordinator` polls the whole Naolib network once per
 update interval and stores every departure indexed by quay. Each configured
 stop then filters and formats the departures it cares about locally, so the
 rate-limited endpoint is hit only once regardless of how many stops are set up.
@@ -17,7 +17,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import TanApiClient
+from .api import NaolibApiClient
 from .const import DEFAULT_UPDATE_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ _VEHICLE_TYPE = {"tram": 1, "bus": 3, "ferry": 4}
 _DIRECTION = {"A": 1, "R": 2}
 
 
-class TanGlobalCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any]]]]):
+class NaolibGlobalCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any]]]]):
     """Poll the whole network and index departures by quay."""
 
     def __init__(self, hass: HomeAssistant) -> None:
@@ -45,7 +45,7 @@ class TanGlobalCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any]]]
             config_entry=None,
             update_interval=timedelta(seconds=DEFAULT_UPDATE_INTERVAL),
         )
-        self.api = TanApiClient(async_get_clientsession(hass))
+        self.api = NaolibApiClient(async_get_clientsession(hass))
         self._intervals: dict[str, int] = {}
 
     def set_interval(self, entry_id: str, seconds: int) -> None:

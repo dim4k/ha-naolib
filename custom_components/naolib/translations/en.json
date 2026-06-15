@@ -2,7 +2,7 @@
     "config": {
         "step": {
             "user": {
-                "title": "Tan Nantes Configuration",
+                "title": "Naolib Nantes Configuration",
                 "description": "Pick a location on the map to search for nearby stops.",
                 "data": {
                     "location": "Location"
@@ -28,7 +28,7 @@
     "options": {
         "step": {
             "init": {
-                "title": "Tan Nantes Options",
+                "title": "Naolib Nantes Options",
                 "description": "Set how often the data is refreshed.",
                 "data": {
                     "update_interval": "Update interval (seconds)"
