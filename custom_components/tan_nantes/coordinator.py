@@ -90,10 +90,11 @@ def _direction(direction_name: str | None) -> int:
 def build_stop_data(
     network: dict[str, list[dict[str, Any]]], quays: list[str]
 ) -> dict[str, Any]:
-    """Build the per-stop payload (departures + schedules) for the card.
+    """Build the per-stop real-time departures for the card.
 
     ``network`` is the global coordinator data keyed by quay; ``quays`` are the
-    quays belonging to the configured stop.
+    quays belonging to the configured stop. The full daily timetable comes from
+    the embedded GTFS data instead (see ``schedules.py``).
     """
     now = dt_util.now()
     collected: list[tuple[datetime, float, dict[str, Any]]] = []
@@ -124,31 +125,4 @@ def build_stop_data(
         for _when, delta, raw in collected
     ]
 
-    return {
-        "next_departures": next_departures,
-        "schedules": _build_schedules(collected),
-    }
-
-
-def _build_schedules(
-    collected: list[tuple[datetime, float, dict[str, Any]]],
-) -> dict[str, dict[str, Any]]:
-    """Group upcoming departures by line/direction for the schedule view."""
-    schedules: dict[str, dict[str, Any]] = {}
-    for when, _delta, raw in collected:
-        line = raw.get("line")
-        direction = _direction(raw.get("direction_name"))
-        destination = raw.get("destination")
-        key = f"{line}-{direction}"
-        entry = schedules.setdefault(
-            key,
-            {
-                "ligne": {"numLigne": line, "direction": destination},
-                "direction_label": destination or f"Sens {direction}",
-                "horaires": {},
-            },
-        )
-        entry["horaires"].setdefault(when.strftime("%H"), []).append(
-            when.strftime("%M")
-        )
-    return schedules
+    return {"next_departures": next_departures}

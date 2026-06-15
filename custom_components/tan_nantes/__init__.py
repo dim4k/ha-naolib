@@ -1,9 +1,9 @@
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.loader import async_get_integration
 from homeassistant.components import websocket_api
+from homeassistant.util import dt as dt_util
 import voluptuous as vol
 from .const import (
     CONF_QUAYS,
@@ -15,6 +15,7 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import TanGlobalCoordinator, build_stop_data
+from .schedules import build_timetable
 import logging
 
 _LOGGER = logging.getLogger(__name__)
@@ -101,14 +102,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: TanConfigEntry) -> bool:
     if coordinator is None:
         coordinator = TanGlobalCoordinator(hass)
         data["coordinator"] = coordinator
+        # Kick off an initial fetch in the background. The endpoint is
+        # rate-limited (1 request / 30 s), so we must not fail or retry the
+        # whole setup on a transient 429 — the coordinator will keep polling.
+        entry.async_create_background_task(
+            hass, coordinator.async_refresh(), "tan_nantes_initial_refresh"
+        )
 
     update_interval = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
     coordinator.set_interval(entry.entry_id, int(update_interval))
-
-    if coordinator.data is None:
-        await coordinator.async_refresh()
-        if not coordinator.last_update_success:
-            raise ConfigEntryNotReady("Unable to fetch initial Naolib data")
 
     entry.runtime_data = coordinator
     data["stops"][stop_code] = {
@@ -128,12 +130,12 @@ async def _async_update_listener(hass: HomeAssistant, entry: TanConfigEntry) -> 
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-@callback
 @websocket_api.websocket_command({
     vol.Required("type"): "tan_nantes/get_data",
     vol.Required("stop_code"): str,
 })
-def handle_get_data(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+@websocket_api.async_response
+async def handle_get_data(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     """Handle get data command."""
     stop_code = msg["stop_code"]
     domain_data = hass.data.get(DOMAIN, {})
@@ -147,6 +149,10 @@ def handle_get_data(hass: HomeAssistant, connection: websocket_api.ActiveConnect
         return
 
     payload = build_stop_data(coordinator.data or {}, stop["quays"])
+    today = dt_util.now().date()
+    payload["schedules"] = await hass.async_add_executor_job(
+        build_timetable, stop_code, today
+    )
     connection.send_result(msg["id"], payload)
 
 

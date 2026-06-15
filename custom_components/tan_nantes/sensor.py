@@ -82,5 +82,6 @@ class TanNextDeparturesSensor(CoordinatorEntity[TanGlobalCoordinator], SensorEnt
         """Return next passages and stop code as attributes."""
         return {
             "stop_code": self._stop_code,
+            "stop_label": self._stop_name,
             "next_departures": self._stop_data().get("next_departures", []),
         }
