@@ -1,4 +1,4 @@
-name: Update stops index
+name: Update stops index and timetables
 
 on:
     schedule:
@@ -20,17 +20,17 @@ jobs:
               with:
                   python-version: "3.12"
 
-            - name: Regenerate stops index
+            - name: Regenerate stops index and timetables
               run: python scripts/generate_stops_index.py
 
             - name: Commit changes if any
               run: |
-                  if [[ -n "$(git status --porcelain custom_components/tan_nantes/data/stops_index.json)" ]]; then
+                  if [[ -n "$(git status --porcelain custom_components/tan_nantes/data)" ]]; then
                       git config user.name "github-actions[bot]"
                       git config user.email "github-actions[bot]@users.noreply.github.com"
-                      git add custom_components/tan_nantes/data/stops_index.json
-                      git commit -m "chore: update stops index"
+                      git add custom_components/tan_nantes/data
+                      git commit -m "chore: update stops index and timetables"
                       git push
                   else
-                      echo "Stops index already up to date."
+                      echo "Stops data already up to date."
                   fi

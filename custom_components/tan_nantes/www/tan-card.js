@@ -56,7 +56,9 @@ class TanNantesCard extends HTMLElement {
         this._state = state;
         this._isError = false;
 
-        this._updateTitle(state.attributes.friendly_name);
+        this._updateTitle(
+            state.attributes.stop_label || state.attributes.friendly_name
+        );
 
         // Fetch data via WebSocket
         const stopCode = state.attributes.stop_code;

@@ -33,5 +33,9 @@ SIRI_NAMESPACE: str = "http://www.siri.org.uk/siri"
 # Embedded stop index (generated from the GTFS feed by scripts/).
 STOPS_INDEX_FILE: str = "data/stops_index.json"
 
+# Embedded theoretical timetables (generated from the GTFS feed by scripts/).
+SCHEDULES_FILE: str = "data/schedules.json"
+CALENDAR_FILE: str = "data/calendar.json"
+
 # Number of nearby stops proposed in the config flow.
 NEARBY_STOPS_LIMIT: int = 15
