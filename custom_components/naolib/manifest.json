@@ -5,9 +5,11 @@
     "config_flow": true,
     "dependencies": ["http", "frontend"],
     "documentation": "https://github.com/dim4k/ha-naolib",
-    "integration_type": "service",
+    "integration_type": "device",
     "iot_class": "cloud_polling",
     "issue_tracker": "https://github.com/dim4k/ha-naolib/issues",
+    "loggers": ["naolib"],
+    "quality_scale": "bronze",
     "requirements": [],
-    "version": "2.3.3"
+    "version": "2.4.0"
 }

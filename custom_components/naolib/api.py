@@ -95,11 +95,20 @@ class NaolibApiClient:
             if exception.status == 429:
                 # The public endpoint allows one request every 30 seconds.
                 _LOGGER.debug("Naolib SIRI rate limit hit (429), will retry")
+            elif exception.status in (502, 503, 504):
+                # Transient upstream gateway errors; the coordinator retries on
+                # the next cycle, so keep these out of the error log.
+                _LOGGER.debug(
+                    "Naolib SIRI temporarily unavailable (%s), will retry",
+                    exception.status,
+                )
             else:
                 _LOGGER.error("Error fetching SIRI data: %s", exception)
             return None
         except (aiohttp.ClientError, asyncio.TimeoutError) as exception:
-            _LOGGER.error("Error fetching SIRI data: %s", exception)
+            # Network hiccups and timeouts are transient; the coordinator will
+            # retry on the next cycle.
+            _LOGGER.debug("Naolib SIRI request failed transiently: %s", exception)
             return None
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Unexpected error connecting to the Naolib SIRI API")

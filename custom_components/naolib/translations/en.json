@@ -6,6 +6,9 @@
                 "description": "Pick a location on the map to search for nearby stops.",
                 "data": {
                     "location": "Location"
+                },
+                "data_description": {
+                    "location": "Move the marker to the area where you want to look for stops. Defaults to your home location."
                 }
             },
             "select_stop": {
@@ -13,6 +16,9 @@
                 "description": "Select the stop to track.",
                 "data": {
                     "stop_code": "Stop"
+                },
+                "data_description": {
+                    "stop_code": "List of the closest stops, with their distance."
                 }
             }
         },
@@ -32,6 +38,9 @@
                 "description": "Set how often the data is refreshed.",
                 "data": {
                     "update_interval": "Update interval (seconds)"
+                },
+                "data_description": {
+                    "update_interval": "Delay between two calls to the real-time API. The public endpoint is limited to one request every 30 seconds."
                 }
             }
         }

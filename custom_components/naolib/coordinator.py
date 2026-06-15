@@ -129,4 +129,11 @@ def build_stop_data(
         for _when, delta, raw in collected
     ]
 
-    return {"next_departures": next_departures}
+    # Timestamp of the very next departure, exposed as the sensor's native
+    # value (SensorDeviceClass.TIMESTAMP). ``None`` when no bus is upcoming.
+    next_departure_dt = collected[0][0] if collected else None
+
+    return {
+        "next_departures": next_departures,
+        "next_departure_dt": next_departure_dt,
+    }

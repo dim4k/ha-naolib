@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import voluptuous as vol
 
@@ -42,7 +42,7 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._stops: list[dict[str, Any]] = []
 
     async def async_step_user(
-        self, user_input: Optional[dict[str, Any]] = None
+        self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle the initial step: pick a location on the map."""
         errors: dict[str, str] = {}
@@ -52,13 +52,18 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             lat = location["latitude"]
             lon = location["longitude"]
 
-            self._stops = await self.hass.async_add_executor_job(
-                nearby_stops, lat, lon
-            )
-            if not self._stops:
-                errors["base"] = "no_stops_found"
+            try:
+                self._stops = await self.hass.async_add_executor_job(
+                    nearby_stops, lat, lon
+                )
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Failed to search for nearby Naolib stops")
+                errors["base"] = "unknown"
             else:
-                return await self.async_step_select_stop()
+                if not self._stops:
+                    errors["base"] = "no_stops_found"
+                else:
+                    return await self.async_step_select_stop()
 
         default_location = {
             "latitude": self.hass.config.latitude,
@@ -77,13 +82,13 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_reconfigure(
-        self, user_input: Optional[dict[str, Any]] = None
+        self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Allow changing the stop of an existing entry."""
         return await self.async_step_user(user_input)
 
     async def async_step_select_stop(
-        self, user_input: Optional[dict[str, Any]] = None
+        self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle the second step: choose a stop among the nearby ones."""
         if user_input is not None:
@@ -155,7 +160,7 @@ class NaolibOptionsFlow(OptionsFlow):
     """Handle options (polling interval)."""
 
     async def async_step_init(
-        self, user_input: Optional[dict[str, Any]] = None
+        self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Manage the integration options."""
         if user_input is not None:
