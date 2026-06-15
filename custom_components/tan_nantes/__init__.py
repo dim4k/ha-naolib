@@ -42,29 +42,45 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     ])
 
     # 2. Register the card as a Lovelace resource
-    # This is required for the card to be recognized by the dashboard
-    try:
-        resources = hass.data["lovelace"].resources
-        if not resources.loaded:
-            await resources.async_load()
-
-        card_url = f"{url_path}/tan-card.js?hacstag={version}"
-
-        # Check if already registered, update version if needed
-        found = False
-        for resource in resources.async_items():
-            if resource["url"].startswith(url_path):
-                found = True
-                if resource["url"] != card_url:
-                    await resources.async_update_item(resource["id"], {"url": card_url})
-                break
-
-        if not found:
-            await resources.async_create_item({"res_type": "module", "url": card_url})
-    except KeyError:
+    # This is only possible when Lovelace runs in "storage" mode (the default,
+    # UI-managed dashboards). In YAML mode the resources are read-only and the
+    # user is expected to declare the resource themselves, so we skip silently.
+    lovelace = hass.data.get("lovelace")
+    if lovelace is None:
         _LOGGER.warning("Lovelace not available yet, skipping resource registration")
-    except Exception as err:  # noqa: BLE001
-        _LOGGER.warning("Could not register Lovelace resource: %s", err)
+    elif getattr(lovelace, "mode", None) != "storage":
+        _LOGGER.debug(
+            "Lovelace is in YAML mode; add the card resource manually: %s",
+            f"{url_path}/tan-card.js",
+        )
+    else:
+        try:
+            resources = lovelace.resources
+            if resources is None:
+                raise AttributeError("Lovelace resources collection is unavailable")
+
+            if not resources.loaded:
+                await resources.async_load()
+
+            card_url = f"{url_path}/tan-card.js?hacstag={version}"
+
+            # Check if already registered, update version if needed
+            found = False
+            for resource in resources.async_items():
+                if resource["url"].startswith(url_path):
+                    found = True
+                    if resource["url"] != card_url:
+                        await resources.async_update_item(
+                            resource["id"], {"url": card_url}
+                        )
+                    break
+
+            if not found:
+                await resources.async_create_item(
+                    {"res_type": "module", "url": card_url}
+                )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Could not register Lovelace resource: %s", err)
 
     # 3. Register WebSocket command
     websocket_api.async_register_command(hass, handle_get_data)

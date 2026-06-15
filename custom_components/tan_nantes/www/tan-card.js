@@ -1,8 +1,19 @@
+// Detect a Tan Nantes sensor by its attributes rather than its entity_id,
+// so the card keeps working even if the entity is renamed.
+function isTanNantesEntity(state) {
+    return (
+        !!state &&
+        state.attributes.stop_code !== undefined &&
+        Array.isArray(state.attributes.next_departures)
+    );
+}
+
 class TanNantesCard extends HTMLElement {
     static getStubConfig(hass, entities, entitiesFallback) {
-        // Try to find an entity in the list of states
+        // Try to find a Tan Nantes sensor by its attributes (not its
+        // entity_id), so detection keeps working regardless of naming.
         const entity = Object.keys(hass.states).find((eid) =>
-            eid.startsWith("sensor.tan_next_")
+            isTanNantesEntity(hass.states[eid])
         );
         return {
             entity: entity || "",
@@ -23,7 +34,7 @@ class TanNantesCard extends HTMLElement {
         // Fallback: try to find an entity if none is configured
         if (!entityId) {
             const found = Object.keys(hass.states).find((eid) =>
-                eid.startsWith("sensor.tan_next_")
+                isTanNantesEntity(hass.states[eid])
             );
             if (found) {
                 entityId = found;
@@ -432,7 +443,7 @@ class TanNantesCardEditor extends HTMLElement {
         this.content.innerHTML = `
             <div class="card-config">
                 <ha-entity-picker
-                    label="Entité (sensor.tan_next_...)"
+                    label="Entité (arrêt Tan)"
                     domain-filter="sensor"
                     include-domains='["sensor"]'
                 ></ha-entity-picker>

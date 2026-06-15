@@ -39,6 +39,10 @@ class TanGlobalCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any]]]
             hass,
             _LOGGER,
             name=f"{DOMAIN}_global",
+            # The coordinator is shared across every config entry, so it is not
+            # tied to a single one; passing None silences the deprecation
+            # warning without binding its lifecycle to one entry.
+            config_entry=None,
             update_interval=timedelta(seconds=DEFAULT_UPDATE_INTERVAL),
         )
         self.api = TanApiClient(async_get_clientsession(hass))

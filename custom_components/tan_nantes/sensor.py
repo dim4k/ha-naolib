@@ -3,7 +3,7 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -40,7 +40,8 @@ async def async_setup_entry(
 class TanNextDeparturesSensor(CoordinatorEntity[TanGlobalCoordinator], SensorEntity):
     """Represent the next bus at the stop."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
+    _attr_translation_key = "next_departures"
 
     def __init__(
         self,
@@ -55,7 +56,6 @@ class TanNextDeparturesSensor(CoordinatorEntity[TanGlobalCoordinator], SensorEnt
         self._stop_name = stop_name
         self._quays = quays
         self._attr_unique_id = f"tan_{stop_code}_next"
-        self._attr_name = f"Tan Next - {stop_name}"
         self._attr_icon = "mdi:bus-clock"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, stop_code)},
@@ -63,18 +63,24 @@ class TanNextDeparturesSensor(CoordinatorEntity[TanGlobalCoordinator], SensorEnt
             manufacturer="TAN",
             model="Arrêt",
         )
+        self._departures: list[dict[str, Any]] = self._build_departures()
 
-    def _stop_data(self) -> dict[str, Any]:
-        """Build the per-stop payload from the shared network data."""
+    def _build_departures(self) -> list[dict[str, Any]]:
+        """Build the per-stop departures from the shared network data."""
         network = self.coordinator.data or {}
-        return build_stop_data(network, self._quays)
+        return build_stop_data(network, self._quays).get("next_departures", [])
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Recompute the cached departures when new network data arrives."""
+        self._departures = self._build_departures()
+        super()._handle_coordinator_update()
 
     @property
     def native_value(self) -> str:
         """Return the time of the very first bus."""
-        passages = self._stop_data().get("next_departures", [])
-        if passages:
-            return passages[0].get("time", STATE_UNAVAILABLE)
+        if self._departures:
+            return self._departures[0].get("time", STATE_UNAVAILABLE)
         return STATE_NO_BUS
 
     @property
@@ -83,5 +89,5 @@ class TanNextDeparturesSensor(CoordinatorEntity[TanGlobalCoordinator], SensorEnt
         return {
             "stop_code": self._stop_code,
             "stop_label": self._stop_name,
-            "next_departures": self._stop_data().get("next_departures", []),
+            "next_departures": self._departures,
         }

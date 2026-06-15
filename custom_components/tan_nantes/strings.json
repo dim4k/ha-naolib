@@ -35,6 +35,13 @@
                 }
             }
         }
+    },
+    "entity": {
+        "sensor": {
+            "next_departures": {
+                "name": "Prochains départs"
+            }
+        }
     }
 }
 
