@@ -1,11 +1,13 @@
-import logging
-from typing import Any
+from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity
-from homeassistant.config_entries import ConfigEntry
+import logging
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
+
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -13,18 +15,23 @@ from .const import (
     CONF_STOP_CODE,
     CONF_STOP_LABEL,
     DOMAIN,
-    STATE_NO_BUS,
-    STATE_UNAVAILABLE,
 )
 from .coordinator import NaolibGlobalCoordinator, build_stop_data
 
+if TYPE_CHECKING:
+    from . import NaolibConfigEntry
+
 _LOGGER = logging.getLogger(__name__)
+
+# All entities read from a single shared coordinator, so there is no per-entity
+# polling to serialize.
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    entry: NaolibConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the sensors based on the config entry."""
     coordinator: NaolibGlobalCoordinator = entry.runtime_data
@@ -42,6 +49,8 @@ class NaolibNextDeparturesSensor(CoordinatorEntity[NaolibGlobalCoordinator], Sen
 
     _attr_has_entity_name = True
     _attr_translation_key = "next_departures"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_attribution = "Données Naolib / Okina"
 
     def __init__(
         self,
@@ -63,25 +72,28 @@ class NaolibNextDeparturesSensor(CoordinatorEntity[NaolibGlobalCoordinator], Sen
             manufacturer="Naolib",
             model="Arrêt",
         )
-        self._departures: list[dict[str, Any]] = self._build_departures()
+        self._stop_data: dict[str, Any] = self._build_stop_data()
 
-    def _build_departures(self) -> list[dict[str, Any]]:
-        """Build the per-stop departures from the shared network data."""
+    def _build_stop_data(self) -> dict[str, Any]:
+        """Build the per-stop data from the shared network data."""
         network = self.coordinator.data or {}
-        return build_stop_data(network, self._quays).get("next_departures", [])
+        return build_stop_data(network, self._quays)
+
+    @property
+    def _departures(self) -> list[dict[str, Any]]:
+        """Return the cached formatted departures."""
+        return self._stop_data.get("next_departures", [])
 
     @callback
     def _handle_coordinator_update(self) -> None:
         """Recompute the cached departures when new network data arrives."""
-        self._departures = self._build_departures()
+        self._stop_data = self._build_stop_data()
         super()._handle_coordinator_update()
 
     @property
-    def native_value(self) -> str:
-        """Return the time of the very first bus."""
-        if self._departures:
-            return self._departures[0].get("time", STATE_UNAVAILABLE)
-        return STATE_NO_BUS
+    def native_value(self) -> datetime | None:
+        """Return the timestamp of the very next bus, or None if none."""
+        return self._stop_data.get("next_departure_dt")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

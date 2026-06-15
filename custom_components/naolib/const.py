@@ -18,10 +18,6 @@ MIN_UPDATE_INTERVAL: int = 30
 MAX_UPDATE_INTERVAL: int = 600
 API_TIMEOUT: int = 20
 
-# Sensor state values
-STATE_NO_BUS: str = "Aucun bus"
-STATE_UNAVAILABLE: str = "Indisponible"
-
 # Naolib / Okina real-time SIRI endpoint (keyless public access).
 # A single StopMonitoring request without MonitoringRef returns the whole
 # network, which we fetch once and share across all configured stops.

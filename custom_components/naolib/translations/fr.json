@@ -6,6 +6,9 @@
                 "description": "Choisissez une position sur la carte pour rechercher les arrêts à proximité.",
                 "data": {
                     "location": "Position"
+                },
+                "data_description": {
+                    "location": "Déplacez le marqueur sur la zone où chercher les arrêts. Par défaut, la position de votre domicile."
                 }
             },
             "select_stop": {
@@ -13,6 +16,9 @@
                 "description": "Sélectionnez l'arrêt à suivre.",
                 "data": {
                     "stop_code": "Arrêt"
+                },
+                "data_description": {
+                    "stop_code": "Liste des arrêts les plus proches, avec leur distance."
                 }
             }
         },
@@ -32,6 +38,9 @@
                 "description": "Réglez la fréquence de rafraîchissement des données.",
                 "data": {
                     "update_interval": "Intervalle de mise à jour (secondes)"
+                },
+                "data_description": {
+                    "update_interval": "Délai entre deux interrogations de l'API temps réel. L'endpoint public est limité à une requête toutes les 30 secondes."
                 }
             }
         }

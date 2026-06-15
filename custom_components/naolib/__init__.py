@@ -1,6 +1,7 @@
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.loader import async_get_integration
 from homeassistant.components import websocket_api
 from homeassistant.util import dt as dt_util
@@ -25,65 +26,48 @@ type NaolibConfigEntry = ConfigEntry[NaolibGlobalCoordinator]
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:
-    """Register the static path, Lovelace resource and WS command once."""
+    """Serve the card's static files and load it on the frontend.
+
+    The card module is loaded via ``add_extra_js_url`` instead of a Lovelace
+    "resource". This works regardless of the Lovelace mode (storage or YAML),
+    requires no user action and avoids stale resource entries that broke the
+    card after the TAN -> Naolib rebranding.
+    """
+    data = hass.data.setdefault(DOMAIN, {})
+    if data.get("frontend_registered"):
+        return
+
     integration = await async_get_integration(hass, DOMAIN)
     version = integration.version
 
-    # 1. Define the virtual URL path to serve static files
+    # 1. Serve the card's static files.
     path = hass.config.path("custom_components/naolib/www")
     url_path = "/naolib_static"
 
-    await hass.http.async_register_static_paths([
-        StaticPathConfig(
-            url_path=url_path,
-            path=path,
-            cache_headers=False
-        )
-    ])
+    if not data.get("static_path_registered"):
+        await hass.http.async_register_static_paths([
+            StaticPathConfig(
+                url_path=url_path,
+                path=path,
+                cache_headers=False,
+            )
+        ])
+        data["static_path_registered"] = True
+        _LOGGER.info("Registered Naolib static path: %s", url_path)
 
-    # 2. Register the card as a Lovelace resource
-    # This is only possible when Lovelace runs in "storage" mode (the default,
-    # UI-managed dashboards). In YAML mode the resources are read-only and the
-    # user is expected to declare the resource themselves, so we skip silently.
-    lovelace = hass.data.get("lovelace")
-    if lovelace is None:
-        _LOGGER.warning("Lovelace not available yet, skipping resource registration")
-    elif getattr(lovelace, "mode", None) != "storage":
-        _LOGGER.debug(
-            "Lovelace is in YAML mode; add the card resource manually: %s",
-            f"{url_path}/naolib-card.js",
-        )
-    else:
-        try:
-            resources = lovelace.resources
-            if resources is None:
-                raise AttributeError("Lovelace resources collection is unavailable")
+    # 2. Load the card module on every frontend page (version acts as a
+    #    cache-buster so updates are picked up after a hard refresh).
+    card_url = f"{url_path}/naolib-card.js?v={version}"
+    add_extra_js_url(hass, card_url)
+    _LOGGER.info("Registered Naolib frontend module: %s", card_url)
 
-            if not resources.loaded:
-                await resources.async_load()
+    # 3. Register WebSocket command.
+    if not data.get("websocket_registered"):
+        websocket_api.async_register_command(hass, handle_get_data)
+        data["websocket_registered"] = True
+        _LOGGER.info("Registered Naolib WebSocket command")
 
-            card_url = f"{url_path}/naolib-card.js?hacstag={version}"
-
-            # Check if already registered, update version if needed
-            found = False
-            for resource in resources.async_items():
-                if resource["url"].startswith(url_path):
-                    found = True
-                    if resource["url"] != card_url:
-                        await resources.async_update_item(
-                            resource["id"], {"url": card_url}
-                        )
-                    break
-
-            if not found:
-                await resources.async_create_item(
-                    {"res_type": "module", "url": card_url}
-                )
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.warning("Could not register Lovelace resource: %s", err)
-
-    # 3. Register WebSocket command
-    websocket_api.async_register_command(hass, handle_get_data)
+    data["frontend_registered"] = True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bool:
@@ -92,9 +76,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bo
     data.setdefault("stops", {})
 
     # Register static path, JS and WS command only once
-    if not data.get("js_registered"):
-        await _async_register_frontend(hass)
-        data["js_registered"] = True
+    await _async_register_frontend(hass)
 
     stop_code = entry.data.get(CONF_STOP_CODE)
     quays = entry.data.get(CONF_QUAYS)
