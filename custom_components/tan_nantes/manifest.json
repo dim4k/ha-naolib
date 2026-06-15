@@ -5,8 +5,9 @@
     "config_flow": true,
     "dependencies": ["http"],
     "documentation": "https://github.com/dim4K/ha-tan-nantes",
+    "integration_type": "service",
     "iot_class": "cloud_polling",
     "issue_tracker": "https://github.com/dim4K/ha-tan-nantes/issues",
     "requirements": [],
-    "version": "2.1.0"
+    "version": "2.2.0"
 }

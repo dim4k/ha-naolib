@@ -4,9 +4,8 @@ from typing import Any, Optional
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigEntry, OptionsFlow
+from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
     LocationSelector,
     NumberSelector,
@@ -44,7 +43,7 @@ class TanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: Optional[dict[str, Any]] = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial step: pick a location on the map."""
         errors: dict[str, str] = {}
 
@@ -79,13 +78,13 @@ class TanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_reconfigure(
         self, user_input: Optional[dict[str, Any]] = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Allow changing the stop of an existing entry."""
         return await self.async_step_user(user_input)
 
     async def async_step_select_stop(
         self, user_input: Optional[dict[str, Any]] = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the second step: choose a stop among the nearby ones."""
         if user_input is not None:
             stop_code = user_input[CONF_STOP_CODE]
@@ -157,7 +156,7 @@ class TanOptionsFlow(OptionsFlow):
 
     async def async_step_init(
         self, user_input: Optional[dict[str, Any]] = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Manage the integration options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
