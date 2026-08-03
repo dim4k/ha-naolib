@@ -12,6 +12,14 @@ CONF_QUAYS: str = "quays"
 CONF_LOCATION: str = "location"
 CONF_UPDATE_INTERVAL: str = "update_interval"
 
+# Action exposing the departures to scripts and automations.
+SERVICE_GET_DEPARTURES: str = "get_departures"
+ATTR_CONFIG_ENTRY_ID: str = "config_entry_id"
+ATTR_LINES: str = "lines"
+ATTR_DIRECTION: str = "direction"
+ATTR_WALK_TIME: str = "walk_time"
+ATTR_LIMIT: str = "limit"
+
 # Polling / network defaults
 DEFAULT_UPDATE_INTERVAL: int = 60
 MIN_UPDATE_INTERVAL: int = 30
@@ -21,8 +29,7 @@ API_TIMEOUT: int = 20
 # Naolib / Okina real-time SIRI endpoint (keyless public access).
 # A single StopMonitoring request without MonitoringRef returns the whole
 # network, which we fetch once and share across all configured stops.
-SIRI_DATASET_ID: str = "NAOLIBORG"
-SIRI_URL: str = f"https://api.okina.fr/gateway/sem/realtime/anshar/services/{SIRI_DATASET_ID}"
+SIRI_URL: str = "https://api.okina.fr/gateway/sem/realtime/anshar/services/NAOLIBORG"
 SIRI_REQUESTOR_REF: str = "ha-naolib"
 SIRI_NAMESPACE: str = "http://www.siri.org.uk/siri"
 
@@ -32,17 +39,12 @@ STOPS_INDEX_FILE: str = "data/stops_index.json"
 # URL path serving the card's static files.
 CARD_URL_PATH: str = "/naolib_static"
 
-CARD_FILENAME: str = "naolib-card.js"
 # Thin module Home Assistant imports; it retries the card import on failure.
 LOADER_FILENAME: str = "naolib-loader.js"
 
-# config/www copy and Lovelace resource made by the 2.5.0 pre-releases,
-# cleaned up on startup.
-LEGACY_CARD_DIR: str = "naolib"
-LEGACY_CARD_URL_PATH: str = f"/local/{LEGACY_CARD_DIR}"
-
 # Embedded theoretical timetables (generated from the GTFS feed by scripts/).
-SCHEDULES_FILE: str = "data/schedules.json"
+# One compressed row per station, read on demand.
+SCHEDULES_DB: str = "data/schedules.sqlite"
 CALENDAR_FILE: str = "data/calendar.json"
 
 # Number of nearby stops proposed in the config flow.

@@ -4,18 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from . import NaolibConfigEntry, async_frontend_diagnostics
-
-TO_REDACT = {"latitude", "longitude"}
 
 
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: NaolibConfigEntry
 ) -> dict[str, Any]:
-    """Return diagnostics for a config entry."""
+    """Return diagnostics for a config entry.
+
+    Nothing is redacted: an entry only holds a public stop code, its label and
+    the quays it serves.
+    """
     coordinator = entry.runtime_data
     network = coordinator.data or {}
 
@@ -23,8 +24,8 @@ async def async_get_config_entry_diagnostics(
         "entry": {
             "title": entry.title,
             "unique_id": entry.unique_id,
-            "data": async_redact_data(entry.data, TO_REDACT),
-            "options": async_redact_data(entry.options, TO_REDACT),
+            "data": dict(entry.data),
+            "options": dict(entry.options),
         },
         "coordinator": {
             "last_update_success": coordinator.last_update_success,

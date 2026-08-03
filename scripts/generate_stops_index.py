@@ -7,8 +7,9 @@ current Nantes Metropole GTFS and produces, fully offline:
 
 * ``stops_index.json`` — each station (StopPlace) mapped to its quays, used by
   the config flow for the proximity / name search.
-* ``schedules.json`` — the theoretical daily timetable for every station,
-  grouped by line/direction and indexed by GTFS service.
+* ``schedules.sqlite`` — the theoretical daily timetable for every station,
+  grouped by line/direction and indexed by GTFS service. One compressed row
+  per station, so the runtime only reads the stations that are configured.
 * ``calendar.json`` — the service calendar (regular days + exceptions) used at
   runtime to pick the timetable active for the current date.
 
@@ -23,14 +24,17 @@ Run from the repository root. Requires only the Python standard library.
 
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Iterator
 import csv
+from datetime import UTC, datetime
 import io
 import json
+from pathlib import Path
+import sqlite3
 import urllib.request
 import zipfile
-from collections import Counter
-from pathlib import Path
-from typing import Iterator
+import zlib
 
 # Opendatasoft record describing the current GTFS export.
 GTFS_DATASET_URL = (
@@ -39,15 +43,17 @@ GTFS_DATASET_URL = (
 )
 
 _DATA_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "custom_components"
-    / "naolib"
-    / "data"
+    Path(__file__).resolve().parent.parent / "custom_components" / "naolib" / "data"
 )
 
 OUTPUT_PATH = _DATA_DIR / "stops_index.json"
-SCHEDULES_PATH = _DATA_DIR / "schedules.json"
+SCHEDULES_PATH = _DATA_DIR / "schedules.sqlite"
+LEGACY_SCHEDULES_PATH = _DATA_DIR / "schedules.json"
 CALENDAR_PATH = _DATA_DIR / "calendar.json"
+
+# Bumped whenever the stored payload changes shape, so the integration can tell
+# an outdated database from a corrupt one.
+SCHEDULES_FORMAT_VERSION = "1"
 
 _WEEKDAYS = (
     "monday",
@@ -259,7 +265,13 @@ def build_calendar(zf: zipfile.ZipFile) -> dict[str, dict]:
                 continue
             entry = calendar.setdefault(
                 service_id,
-                {"days": [0, 0, 0, 0, 0, 0, 0], "start": "", "end": "", "added": [], "removed": []},
+                {
+                    "days": [0, 0, 0, 0, 0, 0, 0],
+                    "start": "",
+                    "end": "",
+                    "added": [],
+                    "removed": [],
+                },
             )
             if row.get("exception_type", "") == "1":
                 entry["added"].append(date)
@@ -278,7 +290,62 @@ def _write_json(path: Path, data) -> None:
         fh.write("\n")
 
 
+def _write_schedules(path: Path, schedules: dict[str, dict]) -> None:
+    """Write the timetables as one compressed row per station.
+
+    The whole feed is far too large to be loaded in memory by Home Assistant,
+    while a station's timetable is only needed when its card asks for it.
+    """
+    path.unlink(missing_ok=True)
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(
+            """
+            PRAGMA journal_mode = DELETE;
+            CREATE TABLE station_schedules (
+                station_id TEXT PRIMARY KEY,
+                payload BLOB NOT NULL
+            );
+            CREATE TABLE meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            """
+        )
+        connection.executemany(
+            "INSERT INTO station_schedules (station_id, payload) VALUES (?, ?)",
+            (
+                (
+                    station,
+                    zlib.compress(
+                        json.dumps(
+                            groups, ensure_ascii=False, separators=(",", ":")
+                        ).encode(),
+                        9,
+                    ),
+                )
+                for station, groups in schedules.items()
+            ),
+        )
+        connection.executemany(
+            "INSERT INTO meta (key, value) VALUES (?, ?)",
+            (
+                ("format_version", SCHEDULES_FORMAT_VERSION),
+                (
+                    "generated_at",
+                    datetime.now(UTC).isoformat(timespec="seconds"),
+                ),
+                ("station_count", str(len(schedules))),
+            ),
+        )
+        connection.commit()
+        connection.execute("VACUUM")
+    finally:
+        connection.close()
+
+
 def main() -> None:
+    """Download the GTFS feed and regenerate every embedded data file."""
     zip_url = _resolve_gtfs_url()
     archive = _download_archive(zip_url)
 
@@ -296,8 +363,11 @@ def main() -> None:
 
     # Drop stations that ended up without any timetable.
     schedules = {station: groups for station, groups in schedules.items() if groups}
-    _write_json(SCHEDULES_PATH, schedules)
+    _write_schedules(SCHEDULES_PATH, schedules)
     print(f"Wrote {len(schedules)} station timetables to {SCHEDULES_PATH}")
+
+    # Superseded by the SQLite database; removed so the stale copy never ships.
+    LEGACY_SCHEDULES_PATH.unlink(missing_ok=True)
 
     _write_json(CALENDAR_PATH, calendar)
     print(f"Wrote {len(calendar)} services to {CALENDAR_PATH}")

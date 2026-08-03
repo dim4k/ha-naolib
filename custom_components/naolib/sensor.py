@@ -1,3 +1,5 @@
+"""Sensor platform for the Naolib integration."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -9,13 +11,8 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import (
-    CONF_QUAYS,
-    CONF_STOP_CODE,
-    CONF_STOP_LABEL,
-    DOMAIN,
-)
-from .coordinator import NaolibGlobalCoordinator, build_stop_data
+from .const import DOMAIN
+from .coordinator import NaolibGlobalCoordinator, NaolibStop, build_stop_data
 
 if TYPE_CHECKING:
     from . import NaolibConfigEntry
@@ -31,17 +28,15 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the sensors based on the config entry."""
-    coordinator: NaolibGlobalCoordinator = entry.runtime_data
-    stop_code = entry.data.get(CONF_STOP_CODE)
-    stop_name = entry.data.get(CONF_STOP_LABEL) or stop_code
-    quays = entry.data.get(CONF_QUAYS, [])
-
+    coordinator = entry.runtime_data
     async_add_entities(
-        [NaolibNextDeparturesSensor(coordinator, stop_code, stop_name, quays)]
+        [NaolibNextDeparturesSensor(coordinator, coordinator.stops[entry.entry_id])]
     )
 
 
-class NaolibNextDeparturesSensor(CoordinatorEntity[NaolibGlobalCoordinator], SensorEntity):
+class NaolibNextDeparturesSensor(
+    CoordinatorEntity[NaolibGlobalCoordinator], SensorEntity
+):
     """Represent the next bus at the stop."""
 
     _attr_has_entity_name = True
@@ -57,56 +52,37 @@ class NaolibNextDeparturesSensor(CoordinatorEntity[NaolibGlobalCoordinator], Sen
     def __init__(
         self,
         coordinator: NaolibGlobalCoordinator,
-        stop_code: str,
-        stop_name: str,
-        quays: list[str],
+        stop: NaolibStop,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
-        self._stop_code = stop_code
-        self._stop_name = stop_name
-        self._quays = quays
-        self._attr_unique_id = f"naolib_{stop_code}_next"
+        self._stop = stop
+        self._attr_unique_id = f"naolib_{stop.code}_next"
         self._attr_icon = "mdi:bus-clock"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, stop_code)},
-            name=f"Arrêt {stop_name}",
+            identifiers={(DOMAIN, stop.code)},
+            name=f"Arrêt {stop.name}",
             manufacturer="Naolib",
             model="Arrêt",
         )
-        self._stop_data: dict[str, Any] = self._build_stop_data()
-
-    def _build_stop_data(self) -> dict[str, Any]:
-        """Build the per-stop data from the shared network data."""
-        network = self.coordinator.data or {}
-        # ``self.hass`` is not set yet when __init__ runs this; the "last
-        # passage" flags then appear on the first coordinator update.
-        hass = getattr(self, "hass", None)
-        stops = hass.data.get(DOMAIN, {}).get("stops", {}) if hass else {}
-        stop = stops.get(self._stop_code) or {}
-        return build_stop_data(network, self._quays, stop.get("last_times"))
-
-    @property
-    def _departures(self) -> list[dict[str, Any]]:
-        """Return the cached formatted departures."""
-        return self._stop_data.get("next_departures", [])
+        self._stop_data = build_stop_data(coordinator.data or {}, stop)
 
     @callback
     def _handle_coordinator_update(self) -> None:
         """Recompute the cached departures when new network data arrives."""
-        self._stop_data = self._build_stop_data()
+        self._stop_data = build_stop_data(self.coordinator.data or {}, self._stop)
         super()._handle_coordinator_update()
 
     @property
     def native_value(self) -> datetime | None:
         """Return the timestamp of the very next bus, or None if none."""
-        return self._stop_data.get("next_departure_dt")
+        return self._stop_data["next_departure_dt"]
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return next passages and stop code as attributes."""
         return {
-            "stop_code": self._stop_code,
-            "stop_label": self._stop_name,
-            "next_departures": self._departures,
+            "stop_code": self._stop.code,
+            "stop_label": self._stop.name,
+            "next_departures": self._stop_data["next_departures"],
         }

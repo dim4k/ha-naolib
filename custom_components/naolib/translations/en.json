@@ -51,6 +51,42 @@
                 "name": "Next departures"
             }
         }
+    },
+    "services": {
+        "get_departures": {
+            "name": "Get next departures",
+            "description": "Returns the next departures of a configured stop.",
+            "fields": {
+                "config_entry_id": {
+                    "name": "Stop",
+                    "description": "Naolib stop to query."
+                },
+                "lines": {
+                    "name": "Lines",
+                    "description": "Keep only these line numbers. All lines when empty."
+                },
+                "direction": {
+                    "name": "Direction",
+                    "description": "Keep only one direction of travel. Both when empty."
+                },
+                "walk_time": {
+                    "name": "Walking time",
+                    "description": "Skip the departures that can no longer be reached on foot within this time."
+                },
+                "limit": {
+                    "name": "Number of departures",
+                    "description": "Maximum number of departures returned."
+                }
+            }
+        }
+    },
+    "exceptions": {
+        "entry_not_found": {
+            "message": "Naolib stop not found ({entry_id})."
+        },
+        "entry_not_loaded": {
+            "message": "The stop {target} is not loaded."
+        }
     }
 }
 

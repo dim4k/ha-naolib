@@ -10,12 +10,13 @@ one request every 30 seconds per IP).
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 from typing import Any
 from xml.etree import ElementTree as ET
 
 import aiohttp
-
+from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -28,6 +29,8 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 _NS = {"s": SIRI_NAMESPACE}
+
+_VISIT_TAG = f"{{{SIRI_NAMESPACE}}}MonitoredStopVisit"
 
 
 def _text(element: ET.Element | None, path: str) -> str | None:
@@ -56,8 +59,9 @@ def _line_number(line_ref: str | None) -> str | None:
 class NaolibApiClient:
     """Client for the Naolib SIRI StopMonitoring endpoint."""
 
-    def __init__(self, session: aiohttp.ClientSession) -> None:
+    def __init__(self, hass: HomeAssistant, session: aiohttp.ClientSession) -> None:
         """Initialize the API client."""
+        self._hass = hass
         self._session = session
 
     def _build_request(self) -> str:
@@ -77,20 +81,28 @@ class NaolibApiClient:
             "</Siri>"
         )
 
-    async def async_get_all_departures(self) -> dict[str, list[dict[str, Any]]] | None:
+    async def async_get_all_departures(
+        self, quays: set[str] | None = None
+    ) -> dict[str, list[dict[str, Any]]] | None:
         """Fetch the whole network and index departures by quay id.
+
+        ``quays`` restricts the result to the quays actually served by a
+        configured stop: the response covers the whole network, and building an
+        object for each of its thousands of departures is pure waste.
 
         Returns a mapping ``{quay_id: [departure, ...]}`` or ``None`` on error.
         """
         try:
-            async with asyncio.timeout(API_TIMEOUT):
-                async with self._session.post(
+            async with (
+                asyncio.timeout(API_TIMEOUT),
+                self._session.post(
                     SIRI_URL,
                     data=self._build_request(),
                     headers={"Content-Type": "application/xml"},
-                ) as response:
-                    response.raise_for_status()
-                    payload = await response.read()
+                ) as response,
+            ):
+                response.raise_for_status()
+                payload = await response.read()
         except aiohttp.ClientResponseError as exception:
             if exception.status == 429:
                 # The public endpoint allows one request every 30 seconds.
@@ -105,51 +117,48 @@ class NaolibApiClient:
             else:
                 _LOGGER.error("Error fetching SIRI data: %s", exception)
             return None
-        except (aiohttp.ClientError, asyncio.TimeoutError) as exception:
+        except (TimeoutError, aiohttp.ClientError) as exception:
             # Network hiccups and timeouts are transient; the coordinator will
             # retry on the next cycle.
             _LOGGER.debug("Naolib SIRI request failed transiently: %s", exception)
             return None
-        except Exception:  # noqa: BLE001
-            _LOGGER.exception("Unexpected error connecting to the Naolib SIRI API")
-            return None
 
-        return self._parse(payload)
+        # Parsing a whole-network response is slow enough to stall the event
+        # loop on the low-end hardware Home Assistant often runs on.
+        return await self._hass.async_add_executor_job(self._parse, payload, quays)
 
-    def _parse(self, payload: bytes) -> dict[str, list[dict[str, Any]]] | None:
+    def _parse(
+        self, payload: bytes, quays: set[str] | None = None
+    ) -> dict[str, list[dict[str, Any]]] | None:
         """Parse a SIRI StopMonitoring response into departures keyed by quay."""
+        departures: dict[str, list[dict[str, Any]]] = {}
         try:
-            root = ET.fromstring(payload)
+            # iterparse lets each visit be released as soon as it is read,
+            # instead of holding the whole document tree in memory.
+            for _event, visit in ET.iterparse(io.BytesIO(payload)):
+                if visit.tag != _VISIT_TAG:
+                    continue
+
+                quay = _text(visit, "s:MonitoringRef")
+                journey = visit.find("s:MonitoredVehicleJourney", _NS)
+                if quay and journey is not None and (quays is None or quay in quays):
+                    call = journey.find("s:MonitoredCall", _NS)
+                    departures.setdefault(quay, []).append(
+                        {
+                            "line": _line_number(_text(journey, "s:LineRef")),
+                            "destination": _text(journey, "s:DestinationName")
+                            or _text(call, "s:DestinationDisplay"),
+                            "direction_name": _text(journey, "s:DirectionName"),
+                            "vehicle_mode": _text(journey, "s:VehicleMode"),
+                            "expected": _text(call, "s:ExpectedDepartureTime")
+                            or _text(call, "s:ExpectedArrivalTime"),
+                            "aimed": _text(call, "s:AimedDepartureTime")
+                            or _text(call, "s:AimedArrivalTime"),
+                        }
+                    )
+                visit.clear()
         except ET.ParseError as exception:
             _LOGGER.error("Failed to parse SIRI response: %s", exception)
             return None
-
-        departures: dict[str, list[dict[str, Any]]] = {}
-        for visit in root.iter(f"{{{SIRI_NAMESPACE}}}MonitoredStopVisit"):
-            quay = _text(visit, "s:MonitoringRef")
-            journey = visit.find("s:MonitoredVehicleJourney", _NS)
-            if not quay or journey is None:
-                continue
-
-            call = journey.find("s:MonitoredCall", _NS)
-            expected = _text(call, "s:ExpectedDepartureTime") or _text(
-                call, "s:ExpectedArrivalTime"
-            )
-            aimed = _text(call, "s:AimedDepartureTime") or _text(
-                call, "s:AimedArrivalTime"
-            )
-
-            departures.setdefault(quay, []).append(
-                {
-                    "line": _line_number(_text(journey, "s:LineRef")),
-                    "line_name": _text(journey, "s:PublishedLineName"),
-                    "destination": _text(journey, "s:DestinationName")
-                    or _text(call, "s:DestinationDisplay"),
-                    "direction_name": _text(journey, "s:DirectionName"),
-                    "vehicle_mode": _text(journey, "s:VehicleMode"),
-                    "expected": expected,
-                    "aimed": aimed,
-                }
-            )
 
         return departures

@@ -2,45 +2,45 @@
     "config": {
         "step": {
             "user": {
-                "title": "Configuration Naolib Nantes",
-                "description": "Choisissez une position sur la carte pour rechercher les arrêts à proximité.",
+                "title": "Naolib Nantes Configuration",
+                "description": "Pick a location on the map to search for nearby stops.",
                 "data": {
-                    "location": "Position"
+                    "location": "Location"
                 },
                 "data_description": {
-                    "location": "Déplacez le marqueur sur la zone où chercher les arrêts. Par défaut, la position de votre domicile."
+                    "location": "Move the marker to the area where you want to look for stops. Defaults to your home location."
                 }
             },
             "select_stop": {
-                "title": "Choix de l'arrêt",
-                "description": "Sélectionnez l'arrêt à suivre.",
+                "title": "Stop selection",
+                "description": "Select the stop to track.",
                 "data": {
-                    "stop_code": "Arrêt"
+                    "stop_code": "Stop"
                 },
                 "data_description": {
-                    "stop_code": "Liste des arrêts les plus proches, avec leur distance."
+                    "stop_code": "List of the closest stops, with their distance."
                 }
             }
         },
         "error": {
-            "no_stops_found": "Aucun arrêt trouvé à proximité.",
-            "unknown": "Erreur inattendue."
+            "no_stops_found": "No stops found nearby.",
+            "unknown": "Unexpected error."
         },
         "abort": {
-            "already_configured": "Cet arrêt est déjà configuré.",
-            "reconfigure_successful": "Arrêt mis à jour avec succès."
+            "already_configured": "This stop is already configured.",
+            "reconfigure_successful": "Stop updated successfully."
         }
     },
     "options": {
         "step": {
             "init": {
-                "title": "Options Naolib Nantes",
-                "description": "Réglez la fréquence de rafraîchissement des données.",
+                "title": "Naolib Nantes Options",
+                "description": "Set how often the data is refreshed.",
                 "data": {
-                    "update_interval": "Intervalle de mise à jour (secondes)"
+                    "update_interval": "Update interval (seconds)"
                 },
                 "data_description": {
-                    "update_interval": "Délai entre deux interrogations de l'API temps réel. L'endpoint public est limité à une requête toutes les 30 secondes."
+                    "update_interval": "Delay between two calls to the real-time API. The public endpoint is limited to one request every 30 seconds."
                 }
             }
         }
@@ -48,8 +48,44 @@
     "entity": {
         "sensor": {
             "next_departures": {
-                "name": "Prochains départs"
+                "name": "Next departures"
             }
+        }
+    },
+    "services": {
+        "get_departures": {
+            "name": "Get next departures",
+            "description": "Returns the next departures of a configured stop.",
+            "fields": {
+                "config_entry_id": {
+                    "name": "Stop",
+                    "description": "Naolib stop to query."
+                },
+                "lines": {
+                    "name": "Lines",
+                    "description": "Keep only these line numbers. All lines when empty."
+                },
+                "direction": {
+                    "name": "Direction",
+                    "description": "Keep only one direction of travel. Both when empty."
+                },
+                "walk_time": {
+                    "name": "Walking time",
+                    "description": "Skip the departures that can no longer be reached on foot within this time."
+                },
+                "limit": {
+                    "name": "Number of departures",
+                    "description": "Maximum number of departures returned."
+                }
+            }
+        }
+    },
+    "exceptions": {
+        "entry_not_found": {
+            "message": "Naolib stop not found ({entry_id})."
+        },
+        "entry_not_loaded": {
+            "message": "The stop {target} is not loaded."
         }
     }
 }

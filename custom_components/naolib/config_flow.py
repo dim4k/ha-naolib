@@ -1,7 +1,7 @@
+"""Config flow for the Naolib integration."""
+
 import logging
 from typing import Any
-
-import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsFlow
@@ -15,6 +15,7 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
 )
+import voluptuous as vol
 
 from .const import (
     CONF_LOCATION,
@@ -56,7 +57,7 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._stops = await self.hass.async_add_executor_job(
                     nearby_stops, lat, lon
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 _LOGGER.exception("Failed to search for nearby Naolib stops")
                 errors["base"] = "unknown"
             else:
@@ -93,14 +94,14 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the second step: choose a stop among the nearby ones."""
         if user_input is not None:
             stop_code = user_input[CONF_STOP_CODE]
-            stop = next((s for s in self._stops if s["id"] == stop_code), None)
-            stop_label = stop["name"] if stop else stop_code
-            quays = stop["quays"] if stop else []
+            # The selector only accepts one of the stops we just found.
+            stop = next(s for s in self._stops if s["id"] == stop_code)
+            stop_label = stop["name"]
 
             data = {
                 CONF_STOP_CODE: stop_code,
                 CONF_STOP_LABEL: stop_label,
-                CONF_QUAYS: quays,
+                CONF_QUAYS: stop["quays"],
             }
 
             await self.async_set_unique_id(stop_code)
@@ -173,9 +174,7 @@ class NaolibOptionsFlow(OptionsFlow):
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Required(
-                        CONF_UPDATE_INTERVAL, default=current
-                    ): NumberSelector(
+                    vol.Required(CONF_UPDATE_INTERVAL, default=current): NumberSelector(
                         NumberSelectorConfig(
                             min=MIN_UPDATE_INTERVAL,
                             max=MAX_UPDATE_INTERVAL,

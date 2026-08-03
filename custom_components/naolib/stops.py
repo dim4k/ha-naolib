@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-import json
-import math
 from functools import lru_cache
+import json
+import logging
+import math
 from pathlib import Path
 from typing import Any
 
 from .const import NEARBY_STOPS_LIMIT, STOPS_INDEX_FILE
+
+_LOGGER = logging.getLogger(__name__)
 
 _INDEX_PATH = Path(__file__).parent / STOPS_INDEX_FILE
 
@@ -19,8 +22,12 @@ def load_stops() -> list[dict[str, Any]]:
 
     This performs blocking file IO and must be called from an executor.
     """
-    with _INDEX_PATH.open(encoding="utf-8") as fh:
-        return json.load(fh)
+    try:
+        with _INDEX_PATH.open(encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError) as exception:
+        _LOGGER.error("Could not read the embedded stop index: %s", exception)
+        return []
 
 
 def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

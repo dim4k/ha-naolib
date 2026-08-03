@@ -1,0 +1,4 @@
+pytest-homeassistant-custom-component
+# Not pulled by the test harness, but the integration depends on the frontend
+# component, whose setup imports this package.
+home-assistant-frontend

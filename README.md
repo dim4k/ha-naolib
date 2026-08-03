@@ -52,6 +52,16 @@ your stop from the nearby ones. The entities are created right away.
 Repeat the process to follow several stops. The refresh interval, 60 seconds by default,
 can be changed between 30 and 600 seconds from the **Configure** button of the integration.
 
+### Removal
+
+Go to **Settings** > **Devices & services** > **Naolib Nantes**, open the menu of the stop
+you want to drop and choose **Delete**; its device, entities and history go with it.
+
+To uninstall completely, remove every stop, then delete **Naolib Nantes** from HACS (or
+delete `config/custom_components/naolib` for a manual install) and restart Home Assistant.
+The card and its dashboard resource are removed with the integration; the cards left on
+your dashboards have to be deleted by hand.
+
 ## Dashboard card
 
 The card is registered by the integration, so it shows up in the card picker as **Naolib
@@ -68,6 +78,34 @@ entity: sensor.<your_stop>_next_departures
 The card lists the two next departures per line and direction, with the delay and last
 departure markers underneath. The **Voir tous les horaires** button opens the full timetable
 for the day.
+
+All options are available from the visual editor:
+
+| Option                  | Default | Description                                             |
+| ----------------------- | ------- | ------------------------------------------------------- |
+| `entity`                | —       | Sensor of the stop to display (required)                 |
+| `title`                 | stop    | Override the card title                                  |
+| `lines`                 | all     | Only keep these line numbers                             |
+| `direction`             | `0`     | `0` both directions, `1` or `2` to keep only one         |
+| `walk_time`             | `0`     | Minutes of walk: hides departures you can no longer catch |
+| `max_lines`             | `6`     | Maximum rows per direction (per card when compact)       |
+| `show_timetable_button` | `true`  | Show the full timetable button                           |
+| `compact`               | `false` | One line per departure, without direction grouping       |
+
+## Action
+
+`naolib.get_departures` returns the filtered departures of a stop, which is handy in
+scripts and templates:
+
+```yaml
+action: naolib.get_departures
+data:
+    config_entry_id: <entry id of the stop>
+    lines: ["1", "C3"]
+    walk_time: 5
+    limit: 3
+response_variable: departures
+```
 
 ## Entities
 
@@ -108,7 +146,8 @@ automation:
     the card asks for it, grouped by hour to keep the payload small, and never stored as a
     state.
 -   **Offline data is embedded.** The stop index and the timetables are generated from the
-    Nantes Métropole GTFS feed and refreshed monthly by a scheduled workflow.
+    Nantes Métropole GTFS feed and refreshed monthly by a scheduled workflow. Timetables live
+    in a compressed SQLite database, so only the stops you follow are ever read into memory.
 -   **The card is a plain Web Component**, served by the integration itself and isolated in a
     shadow root.
 
@@ -117,6 +156,27 @@ automation:
 Live departures come from the **Naolib / Okina SIRI** public endpoint, stops and timetables
 from the **Nantes Métropole** open data GTFS feed. This project is not affiliated with
 Semitan, Nantes Métropole or Okina.
+
+## Development
+
+The card sources live in `src/` and are bundled into `custom_components/naolib/www/` by
+esbuild; the generated bundles are committed, so rebuild them before opening a pull request:
+
+```bash
+npm ci && npm run check   # eslint + build
+pip install ruff -r requirements_test.txt
+ruff check . && ruff format --check . && pytest
+```
+
+The integration targets the **silver** quality scale, which requires the Python modules to
+stay fully covered:
+
+```bash
+pytest --cov=custom_components/naolib --cov-report=term-missing
+```
+
+The test suite runs against the Home Assistant package, which requires Python 3.13.2 or
+newer.
 
 ## Contributing
 

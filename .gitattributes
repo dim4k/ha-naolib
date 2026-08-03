@@ -1,0 +1,7 @@
+# Generated bundles are written with LF by esbuild; keep the working copy in
+# sync so the CI staleness check does not trip on line endings.
+*.js text eol=lf
+*.mjs text eol=lf
+
+# The generated timetable database is binary; never try to merge it.
+*.sqlite binary

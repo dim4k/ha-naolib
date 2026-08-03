@@ -8,7 +8,8 @@ rate-limited endpoint is hit only once regardless of how many stops are set up.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 import logging
 from typing import Any
 
@@ -31,6 +32,20 @@ _VEHICLE_TYPE = {"tram": 1, "bus": 3, "ferry": 4}
 _DIRECTION = {"A": 1, "R": 2}
 
 
+@dataclass
+class NaolibStop:
+    """A configured stop and the data derived from it."""
+
+    code: str
+    name: str
+    quays: list[str]
+    interval: int
+    # Last scheduled departure of the day per "{line}|{direction}" group,
+    # recomputed by the coordinator when the service day changes.
+    last_times: dict[str, str] = field(default_factory=dict)
+    last_times_date: date | None = None
+
+
 class NaolibGlobalCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any]]]]):
     """Poll the whole network and index departures by quay."""
 
@@ -46,55 +61,82 @@ class NaolibGlobalCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any
             config_entry=None,
             update_interval=timedelta(seconds=DEFAULT_UPDATE_INTERVAL),
         )
-        self.api = NaolibApiClient(async_get_clientsession(hass))
-        self._intervals: dict[str, int] = {}
+        self.api = NaolibApiClient(hass, async_get_clientsession(hass))
+        # Keyed by config entry id: a reconfigured entry changes stop code, so
+        # only the entry id reliably identifies what to drop on unload.
+        self.stops: dict[str, NaolibStop] = {}
+        self._unavailable_logged = False
 
-    def set_interval(self, entry_id: str, seconds: int) -> None:
-        """Register an entry's desired update interval (shortest wins)."""
-        self._intervals[entry_id] = seconds
+    def register_stop(self, entry_id: str, stop: NaolibStop) -> None:
+        """Start serving a configured stop."""
+        self.stops[entry_id] = stop
         self._apply_interval()
 
-    def remove_interval(self, entry_id: str) -> None:
-        """Drop an entry's update interval."""
-        self._intervals.pop(entry_id, None)
+    def unregister_stop(self, entry_id: str) -> None:
+        """Stop serving a configured stop."""
+        self.stops.pop(entry_id, None)
         self._apply_interval()
+
+    def stop_by_code(self, stop_code: str) -> NaolibStop | None:
+        """Return the configured stop with this code, if any."""
+        return next(
+            (stop for stop in self.stops.values() if stop.code == stop_code), None
+        )
 
     def _apply_interval(self) -> None:
         """Use the shortest requested interval across all stops."""
-        seconds = min(self._intervals.values(), default=DEFAULT_UPDATE_INTERVAL)
+        seconds = min(
+            (stop.interval for stop in self.stops.values()),
+            default=DEFAULT_UPDATE_INTERVAL,
+        )
         self.update_interval = timedelta(seconds=seconds)
 
     async def _async_update_data(self) -> dict[str, list[dict[str, Any]]]:
         """Fetch the whole network once."""
-        data = await self.api.async_get_all_departures()
+        wanted = {quay for stop in self.stops.values() for quay in stop.quays}
+        data = await self.api.async_get_all_departures(wanted or None)
         if data is None:
-            if self.data is not None:
-                # Transient failure (rate limit, gateway error, timeout): keep
-                # serving the last known snapshot so entities stay available
-                # instead of flickering "unavailable" on every hiccup.
-                _LOGGER.debug("Naolib API hiccup, serving last known data")
-                return self.data
-            raise UpdateFailed("Error fetching data from the Naolib SIRI API")
+            if self.data is None:
+                raise UpdateFailed("Error fetching data from the Naolib SIRI API")
+            # Transient failure (rate limit, gateway error, timeout): keep
+            # serving the last known snapshot so entities stay available
+            # instead of flickering "unavailable" on every hiccup.
+            if not self._unavailable_logged:
+                _LOGGER.warning(
+                    "The Naolib API is unavailable, serving the last known departures"
+                )
+                self._unavailable_logged = True
+            return self.data
+
+        if self._unavailable_logged:
+            _LOGGER.info("The Naolib API is available again")
+            self._unavailable_logged = False
         await self._async_refresh_last_times()
         return data
 
     async def _async_refresh_last_times(self) -> None:
         """Recompute each stop's last scheduled departures when the day changes.
 
-        The result is stored on the stop entry in ``hass.data`` and read by
-        the sensors when building their departures, so the "last passage of
-        the day" flag follows the GTFS service calendar automatically.
+        The "last passage of the day" flag then follows the GTFS service
+        calendar automatically.
         """
-        stops = self.hass.data.get(DOMAIN, {}).get("stops", {})
         today = dt_util.now().date()
-        for stop_code, stop in stops.items():
-            if stop.get("last_times_date") == today:
+        # Snapshot: a config entry may be set up or removed while we await.
+        for stop in list(self.stops.values()):
+            if stop.last_times_date == today:
                 continue
-            times = await self.hass.async_add_executor_job(
-                last_departures, stop_code, today
+            stop.last_times = await self.hass.async_add_executor_job(
+                last_departures, stop.code, today
             )
-            stop["last_times"] = times
-            stop["last_times_date"] = today
+            stop.last_times_date = today
+
+
+@dataclass
+class NaolibData:
+    """State shared by every config entry, stored in ``hass.data``."""
+
+    coordinator: NaolibGlobalCoordinator
+    loader_url: str = ""
 
 
 def _humanize(delta_seconds: float) -> str:
@@ -117,23 +159,55 @@ def _direction(direction_name: str | None) -> int:
     return _DIRECTION.get((direction_name or "").upper(), 1)
 
 
+def filter_departures(
+    departures: list[dict[str, Any]],
+    lines: list[str] | None = None,
+    direction: int | None = None,
+    walk_minutes: int = 0,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Narrow a formatted departure list down to what the caller asked for.
+
+    ``walk_minutes`` drops the departures that cannot be reached on foot.
+    ``departures`` is expected to be sorted by departure time.
+    """
+    wanted = {line.casefold() for line in lines} if lines else None
+    earliest = dt_util.now() + timedelta(minutes=walk_minutes) if walk_minutes else None
+
+    result: list[dict[str, Any]] = []
+    for departure in departures:
+        if (
+            wanted is not None
+            and (departure.get("line") or "").casefold() not in wanted
+        ):
+            continue
+        if direction is not None and departure.get("direction") != direction:
+            continue
+        if earliest is not None:
+            when = dt_util.parse_datetime(departure.get("expected_ts") or "")
+            if when is None or when < earliest:
+                continue
+        result.append(departure)
+        if limit is not None and len(result) >= limit:
+            break
+    return result
+
+
 def build_stop_data(
     network: dict[str, list[dict[str, Any]]],
-    quays: list[str],
-    last_times: dict[str, str] | None = None,
+    stop: NaolibStop,
 ) -> dict[str, Any]:
     """Build the per-stop real-time departures for the card.
 
-    ``network`` is the global coordinator data keyed by quay; ``quays`` are the
-    quays belonging to the configured stop. ``last_times`` maps each
-    ``"{line}|{direction}"`` group to the last scheduled departure of the day
-    (from the embedded GTFS data, see ``schedules.last_departures``); the full
-    daily timetable comes from ``schedules.build_timetable``.
+    ``network`` is the global coordinator data keyed by quay. The stop's
+    ``last_times`` come from the embedded GTFS data (see
+    ``schedules.last_departures``); the full daily timetable comes from
+    ``schedules.build_timetable``.
     """
     now = dt_util.now()
     collected: list[tuple[datetime, float, dict[str, Any], int | None, bool]] = []
 
-    for quay in quays:
+    for quay in stop.quays:
         for raw in network.get(quay, []):
             expected = raw.get("expected")
             when = dt_util.parse_datetime(expected) if expected else None
@@ -153,9 +227,9 @@ def build_stop_data(
             # day for its line/direction (the realtime feed does not expose
             # this, so it is derived from the theoretical timetable).
             is_last = False
-            if last_times and aimed is not None:
+            if stop.last_times and aimed is not None:
                 group_key = f"{raw.get('line')}|{_direction(raw.get('direction_name'))}"
-                is_last = last_times.get(group_key) == aimed.strftime("%H%M")
+                is_last = stop.last_times.get(group_key) == aimed.strftime("%H%M")
             collected.append((when, delta, raw, delay_minutes, is_last))
 
     collected.sort(key=lambda item: item[0])

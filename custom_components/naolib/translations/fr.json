@@ -51,6 +51,42 @@
                 "name": "Prochains départs"
             }
         }
+    },
+    "services": {
+        "get_departures": {
+            "name": "Obtenir les prochains départs",
+            "description": "Renvoie les prochains départs d'un arrêt configuré.",
+            "fields": {
+                "config_entry_id": {
+                    "name": "Arrêt",
+                    "description": "Arrêt Naolib à interroger."
+                },
+                "lines": {
+                    "name": "Lignes",
+                    "description": "Ne garder que ces numéros de ligne. Toutes les lignes si vide."
+                },
+                "direction": {
+                    "name": "Direction",
+                    "description": "Ne garder qu'un sens de circulation. Les deux si vide."
+                },
+                "walk_time": {
+                    "name": "Temps de marche",
+                    "description": "Ignorer les départs qui ne peuvent plus être atteints à pied dans ce délai."
+                },
+                "limit": {
+                    "name": "Nombre de départs",
+                    "description": "Nombre maximum de départs renvoyés."
+                }
+            }
+        }
+    },
+    "exceptions": {
+        "entry_not_found": {
+            "message": "Arrêt Naolib introuvable ({entry_id})."
+        },
+        "entry_not_loaded": {
+            "message": "L'arrêt {target} n'est pas chargé."
+        }
     }
 }
 
