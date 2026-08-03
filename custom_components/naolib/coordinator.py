@@ -19,6 +19,7 @@ from homeassistant.util import dt as dt_util
 
 from .api import NaolibApiClient
 from .const import DEFAULT_UPDATE_INTERVAL, DOMAIN
+from .schedules import last_departures
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,8 +68,33 @@ class NaolibGlobalCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any
         """Fetch the whole network once."""
         data = await self.api.async_get_all_departures()
         if data is None:
+            if self.data is not None:
+                # Transient failure (rate limit, gateway error, timeout): keep
+                # serving the last known snapshot so entities stay available
+                # instead of flickering "unavailable" on every hiccup.
+                _LOGGER.debug("Naolib API hiccup, serving last known data")
+                return self.data
             raise UpdateFailed("Error fetching data from the Naolib SIRI API")
+        await self._async_refresh_last_times()
         return data
+
+    async def _async_refresh_last_times(self) -> None:
+        """Recompute each stop's last scheduled departures when the day changes.
+
+        The result is stored on the stop entry in ``hass.data`` and read by
+        the sensors when building their departures, so the "last passage of
+        the day" flag follows the GTFS service calendar automatically.
+        """
+        stops = self.hass.data.get(DOMAIN, {}).get("stops", {})
+        today = dt_util.now().date()
+        for stop_code, stop in stops.items():
+            if stop.get("last_times_date") == today:
+                continue
+            times = await self.hass.async_add_executor_job(
+                last_departures, stop_code, today
+            )
+            stop["last_times"] = times
+            stop["last_times_date"] = today
 
 
 def _humanize(delta_seconds: float) -> str:
@@ -92,16 +118,20 @@ def _direction(direction_name: str | None) -> int:
 
 
 def build_stop_data(
-    network: dict[str, list[dict[str, Any]]], quays: list[str]
+    network: dict[str, list[dict[str, Any]]],
+    quays: list[str],
+    last_times: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build the per-stop real-time departures for the card.
 
     ``network`` is the global coordinator data keyed by quay; ``quays`` are the
-    quays belonging to the configured stop. The full daily timetable comes from
-    the embedded GTFS data instead (see ``schedules.py``).
+    quays belonging to the configured stop. ``last_times`` maps each
+    ``"{line}|{direction}"`` group to the last scheduled departure of the day
+    (from the embedded GTFS data, see ``schedules.last_departures``); the full
+    daily timetable comes from ``schedules.build_timetable``.
     """
     now = dt_util.now()
-    collected: list[tuple[datetime, float, dict[str, Any]]] = []
+    collected: list[tuple[datetime, float, dict[str, Any], int | None, bool]] = []
 
     for quay in quays:
         for raw in network.get(quay, []):
@@ -112,7 +142,21 @@ def build_stop_data(
             delta = (when - now).total_seconds()
             if delta < -60:
                 continue
-            collected.append((when, delta, raw))
+            aimed_raw = raw.get("aimed")
+            aimed = dt_util.parse_datetime(aimed_raw) if aimed_raw else None
+            delay_minutes = (
+                round((when - aimed).total_seconds() / 60)
+                if aimed is not None
+                else None
+            )
+            # Flag the departure if it is the last scheduled passage of the
+            # day for its line/direction (the realtime feed does not expose
+            # this, so it is derived from the theoretical timetable).
+            is_last = False
+            if last_times and aimed is not None:
+                group_key = f"{raw.get('line')}|{_direction(raw.get('direction_name'))}"
+                is_last = last_times.get(group_key) == aimed.strftime("%H%M")
+            collected.append((when, delta, raw, delay_minutes, is_last))
 
     collected.sort(key=lambda item: item[0])
 
@@ -122,11 +166,14 @@ def build_stop_data(
             "type": _vehicle_type(raw.get("vehicle_mode")),
             "destination": raw.get("destination"),
             "time": _humanize(delta),
+            # Raw timestamp so the frontend can tick the countdown between
+            # coordinator refreshes.
+            "expected_ts": when.isoformat(),
             "direction": _direction(raw.get("direction_name")),
-            "traffic_info": False,
-            "traffic_message": None,
+            "delay_minutes": delay_minutes,
+            "is_last": is_last,
         }
-        for _when, delta, raw in collected
+        for when, delta, raw, delay_minutes, is_last in collected
     ]
 
     # Timestamp of the very next departure, exposed as the sensor's native

@@ -43,7 +43,7 @@ def _text(element: ET.Element | None, path: str) -> str | None:
 def _line_number(line_ref: str | None) -> str | None:
     """Extract the line number from a SIRI LineRef.
 
-    e.g. ``NAOLIBORG:Line:C3:LOC`` -> ``C3``.
+    e.g. ``FR_NAOLIB:Line:C3:LOC`` -> ``C3``.
     """
     if not line_ref:
         return None
@@ -135,6 +135,9 @@ class NaolibApiClient:
             expected = _text(call, "s:ExpectedDepartureTime") or _text(
                 call, "s:ExpectedArrivalTime"
             )
+            aimed = _text(call, "s:AimedDepartureTime") or _text(
+                call, "s:AimedArrivalTime"
+            )
 
             departures.setdefault(quay, []).append(
                 {
@@ -145,7 +148,7 @@ class NaolibApiClient:
                     "direction_name": _text(journey, "s:DirectionName"),
                     "vehicle_mode": _text(journey, "s:VehicleMode"),
                     "expected": expected,
-                    "proximity": _text(call, "s:ArrivalProximityText"),
+                    "aimed": aimed,
                 }
             )
 

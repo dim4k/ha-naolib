@@ -8,6 +8,23 @@ function isNaolibEntity(state) {
     );
 }
 
+// Escape a value before interpolating it into innerHTML. The SIRI feed is
+// an external data source: a destination or line name containing markup
+// would otherwise be injected straight into the DOM.
+function esc(value) {
+    return String(value ?? "").replace(
+        /[&<>"']/g,
+        (c) =>
+            ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;",
+            })[c]
+    );
+}
+
 class NaolibCard extends HTMLElement {
     static getStubConfig(hass, entities, entitiesFallback) {
         // Try to find a Naolib sensor by its attributes (not its
@@ -25,11 +42,60 @@ class NaolibCard extends HTMLElement {
     }
 
     setConfig(config) {
-        this.config = config;
+        this.config = config || {};
+    }
+
+    connectedCallback() {
+        // Tick the displayed times down between coordinator refreshes, so
+        // the countdown stays accurate (and reaches "proche" on time)
+        // instead of aging until the next poll.
+        if (this._ticker) return;
+        this._ticker = setInterval(() => {
+            if (this._showSchedule || !this._state || !this.content) return;
+            try {
+                this._render();
+            } catch (err) {
+                console.error("Naolib card: render failed", err);
+            }
+        }, 20000);
+    }
+
+    disconnectedCallback() {
+        if (this._ticker) {
+            clearInterval(this._ticker);
+            this._ticker = null;
+        }
     }
 
     set hass(hass) {
-        let entityId = this.config.entity;
+        // Keep a reference for the on-demand timetable WebSocket call.
+        this._hass = hass;
+        try {
+            this._updateFromHass(hass);
+        } catch (err) {
+            // Never let an exception bubble up to Home Assistant, otherwise
+            // the whole card is replaced by a generic "Configuration error".
+            // This happens often on mobile where `hass` may be set before
+            // `setConfig`, or during frequent reconnections.
+            console.error("Naolib card error:", err);
+            try {
+                if (!this.content) this._initShadowDom();
+                this.content.innerHTML = `<div class="no-bus">Erreur: ${esc(
+                    err && err.message ? err.message : err
+                )}</div>`;
+            } catch (renderErr) {
+                // The fallback rendering must not throw either.
+                console.error("Naolib card: cannot render error state", renderErr);
+            }
+        }
+    }
+
+    _updateFromHass(hass) {
+        if (!hass) return;
+
+        // `setConfig` may not have run yet (e.g. on mobile reconnections),
+        // so guard against a missing config object.
+        let entityId = this.config ? this.config.entity : undefined;
 
         // Fallback: try to find an entity if none is configured
         if (!entityId) {
@@ -43,20 +109,20 @@ class NaolibCard extends HTMLElement {
 
         if (!this.content) this._initShadowDom();
         if (!entityId) {
-            this._isError = true;
             this.content.innerHTML = `<div class="no-bus" style="padding: 16px;">No Naolib entities found. Please add the integration via Settings > Devices &amp; Services.</div>`;
             return;
         }
 
         const state = hass.states[entityId];
 
-        if (!state) {
-            this._isError = true;
-            this.content.innerHTML = `<div class="no-bus">Entity not found: ${entityId}</div>`;
+        if (!state || !state.attributes) {
+            this.content.innerHTML = `<div class="no-bus">Entity not found: ${esc(
+                entityId
+            )}</div>`;
             return;
         }
 
-        // Check if state changed to trigger re-render or data fetch
+        // Check if state changed to trigger a re-render
         if (
             this._state &&
             this._state.last_updated === state.last_updated &&
@@ -65,50 +131,59 @@ class NaolibCard extends HTMLElement {
             return;
 
         this._state = state;
-        this._isError = false;
 
         this._updateTitle(
             state.attributes.stop_label || state.attributes.friendly_name
         );
 
-        // Fetch data via WebSocket
-        const stopCode = state.attributes.stop_code;
-        if (stopCode) {
-            // Show loading only on first load or after an error
-            if (!this._data || this._isError) {
-                this._isLoading = true;
-                this.content.innerHTML = `<div class="no-bus">Chargement...</div>`;
-            }
+        if (!state.attributes.stop_code) {
+            this.content.innerHTML = `<div class="no-bus">Entité non configurée (stop_code manquant)</div>`;
+            return;
+        }
 
-            // Prevent concurrent WS calls
-            if (this._fetching) return;
-            this._fetching = true;
+        // Departures are rendered straight from the sensor attributes:
+        // no WebSocket round-trip, so the card displays instantly and
+        // survives flaky mobile connections. The WebSocket is only used
+        // for the full timetable, on demand (see _fetchSchedules).
+        this._render();
+    }
 
-            hass.callWS({
+    _fetchSchedules() {
+        // Fetch the full timetable on demand, only when the schedule view
+        // is opened. Guard against concurrent calls.
+        if (this._fetching || !this._hass || !this._state) return;
+        const stopCode = this._state.attributes.stop_code;
+        if (!stopCode) return;
+
+        this._fetching = true;
+        this._hass
+            .callWS({
                 type: "naolib/get_data",
                 stop_code: stopCode,
             })
-                .then((data) => {
-                    this._data = data;
-                    this._isLoading = false;
-                    this._render();
-                })
-                .catch((err) => {
-                    console.error("Error fetching Naolib data:", err);
-                    this._isError = true;
-                    this._isLoading = false;
-                    this.content.innerHTML = `<div class="no-bus">Erreur de chargement: ${err.message}</div>`;
-                })
-                .finally(() => {
-                    this._fetching = false;
-                });
-        } else {
-            this._isError = true;
-            this.content.innerHTML = `<div class="no-bus">Entité non configurée (stop_code manquant)</div>`;
-        }
+            .then((data) => {
+                this._schedules = (data && data.schedules) || {};
+                this._schedulesFetched = true;
+                if (this._showSchedule) this._render();
+            })
+            .catch((err) => {
+                console.error("Error fetching Naolib schedules:", err);
+                if (this._showSchedule) {
+                    this.content.innerHTML =
+                        this._renderScheduleHeader() +
+                        `<div class="no-bus">Erreur de chargement des horaires: ${esc(
+                            err && err.message ? err.message : err
+                        )}</div>`;
+                }
+            })
+            .finally(() => {
+                this._fetching = false;
+            });
     }
     _initShadowDom() {
-        this.attachShadow({ mode: "open" });
+        // attachShadow throws if a root is already attached, which happens
+        // when a previous call failed after attaching but before filling it.
+        if (!this.shadowRoot) this.attachShadow({ mode: "open" });
         this.shadowRoot.innerHTML = `
             <style>${NaolibCard.styles}</style>
             <ha-card>
@@ -127,6 +202,7 @@ class NaolibCard extends HTMLElement {
             if (e.target.closest("#schedule-btn")) {
                 this._showSchedule = true;
                 this._render();
+                this._fetchSchedules();
             } else if (e.target.closest("#back-btn")) {
                 this._showSchedule = false;
                 this._render();
@@ -140,24 +216,26 @@ class NaolibCard extends HTMLElement {
     }
 
     _render() {
-        if (!this._data) {
+        if (!this._state) {
             this.content.innerHTML = `<div class="no-bus">Chargement...</div>`;
             return;
         }
 
         if (this._showSchedule) {
             this.content.innerHTML = this._renderSchedule(
-                this._data.schedules || {}
+                this._schedules || {},
+                !!this._schedulesFetched
             );
         } else {
             this.content.innerHTML = this._renderDepartures(
-                this._data.next_departures || [],
+                this._state.attributes.next_departures || [],
                 this._state.attributes.stop_code
             );
         }
     }
 
     _renderDepartures(departures, stopCode) {
+        departures = this._withLiveTimes(departures);
         if (departures.length === 0) {
             return (
                 `<div class="no-bus">Aucun départ proche</div>` +
@@ -206,38 +284,36 @@ class NaolibCard extends HTMLElement {
         busDirection.forEach((bus) => {
             const key = `${bus.line}-${bus.destination}`;
             if (!groups[key]) {
-                groups[key] = { ...bus, times: [] };
+                groups[key] = { ...bus, items: [] };
             }
-            groups[key].times.push(bus.time);
+            groups[key].items.push(bus);
         });
 
         // Convert to array and sort by first time
         const sortedGroups = Object.values(groups).sort((a, b) => {
-            return this._parseTime(a.times[0]) - this._parseTime(b.times[0]);
+            return (
+                this._parseTime(a.items[0].time) -
+                this._parseTime(b.items[0].time)
+            );
         });
 
         return sortedGroups
             .map((group) => {
-                const time1 = group.times[0];
-                const time2 = group.times[1]; // Only take the second one if exists
+                const first = group.items[0];
+                const second = group.items[1]; // Only take the second one if exists
 
                 // "proche" or <=1 min => urgent (red), 2-3 min => warning (orange).
-                const isProche = /proche/i.test(time1);
-                const minutes = this._parseTime(time1);
+                const isProche = /proche/i.test(first.time);
+                const minutes = this._parseTime(first.time);
                 const isUrgent = isProche || minutes <= 1;
                 const isWarning = !isUrgent && minutes <= 3;
 
-                const trafficIcon = group.traffic_info
-                    ? `<ha-icon icon="mdi:alert-circle" class="traffic-warning" title="${(
-                          group.traffic_message || "Info trafic"
-                      ).replace(/"/g, "&quot;")}"></ha-icon>`
-                    : "";
-
-                let timeHtml = `<div class="time ${
-                    isUrgent ? "urgent" : isWarning ? "warning" : ""
-                }">${time1}</div>`;
-                if (time2) {
-                    timeHtml += `<div class="time-secondary">${time2}</div>`;
+                let timeHtml = this._departureHtml(
+                    first,
+                    `time ${isUrgent ? "urgent" : isWarning ? "warning" : ""}`
+                );
+                if (second) {
+                    timeHtml += this._departureHtml(second, "time-secondary");
                 }
 
                 return `
@@ -247,8 +323,12 @@ class NaolibCard extends HTMLElement {
                     )}" class="mode-icon"></ha-icon>
                     <div class="badge" style="background-color: ${this._getLineColor(
                         group.line
-                    )};" title="Ligne ${group.line}">${group.line}</div>
-                    <div class="dest">${group.destination}${trafficIcon}</div>
+                    )}; color: ${this._getLineTextColor(
+                    group.line
+                )};" title="Ligne ${esc(group.line)}">${esc(
+                    group.line
+                )}</div>
+                    <div class="dest">${esc(group.destination)}</div>
                     <div class="times-container">
                         ${timeHtml}
                     </div>
@@ -256,6 +336,20 @@ class NaolibCard extends HTMLElement {
             `;
             })
             .join("");
+    }
+
+    // Delay and "last departure" sit under the time they describe: on the
+    // same line they read like another departure.
+    _departureHtml(item, timeClass) {
+        const meta = `${this._delayBadge(item.delay_minutes)}${this._lastBadge(
+            item.is_last
+        )}`;
+        return `
+            <div class="departure">
+                <div class="${timeClass}">${esc(item.time)}</div>
+                ${meta ? `<div class="departure-meta">${meta}</div>` : ""}
+            </div>
+        `;
     }
 
     _parseTime(timeStr) {
@@ -268,11 +362,61 @@ class NaolibCard extends HTMLElement {
         return val;
     }
 
-    _renderSchedule(schedules) {
+    // Recompute the humanized times from the raw timestamps, so the card
+    // ticks down between coordinator refreshes. Departures more than 60 s
+    // in the past are dropped (mirrors the backend filter).
+    _withLiveTimes(departures) {
+        const now = Date.now();
+        const out = [];
+        for (const d of departures) {
+            if (!d.expected_ts) {
+                out.push(d);
+                continue;
+            }
+            const delta = (Date.parse(d.expected_ts) - now) / 1000;
+            if (delta < -60) continue;
+            out.push({ ...d, time: this._humanizeSeconds(delta) });
+        }
+        return out;
+    }
+
+    // Same output format as the backend _humanize().
+    _humanizeSeconds(delta) {
+        if (delta <= 60) return "proche";
+        const minutes = Math.floor(delta / 60);
+        if (minutes < 60) return `${minutes} mn`;
+        const hours = Math.floor(minutes / 60);
+        return `${hours}h${String(minutes % 60).padStart(2, "0")}`;
+    }
+
+    // Delay vs the theoretical timetable (SIRI Aimed vs Expected).
+    _delayBadge(delay) {
+        if (typeof delay !== "number") return "";
+        if (delay >= 2)
+            return `<div class="time-meta late" title="Retard vs horaire théorique">+${delay} min</div>`;
+        if (delay <= -2)
+            return `<div class="time-meta early" title="Avance vs horaire théorique">${delay} min</div>`;
+        return "";
+    }
+
+    // Last scheduled passage of the day (from the GTFS timetable; the
+    // realtime feed does not expose it).
+    _lastBadge(isLast) {
+        if (!isLast) return "";
+        return `<div class="time-meta last" title="Dernier passage prévu aujourd'hui">dernier</div>`;
+    }
+
+    _renderSchedule(schedules, fetched) {
         if (Object.keys(schedules).length === 0) {
+            // Distinguish "still loading" from "no service today" (e.g.
+            // Sunday or holiday), which also returns an empty timetable.
             return `
                 ${this._renderScheduleHeader()}
-                <div class="no-bus">Chargement des horaires...</div>
+                <div class="no-bus">${
+                    fetched
+                        ? "Aucun horaire aujourd'hui"
+                        : "Chargement des horaires..."
+                }</div>
             `;
         }
 
@@ -291,31 +435,26 @@ class NaolibCard extends HTMLElement {
 
                 let timesHtml = "";
                 if (data.horaires) {
-                    let horairesList = [];
-                    if (Array.isArray(data.horaires)) {
-                        horairesList = data.horaires;
-                    } else {
-                        // Convert object back to array for sorting/mapping
-                        horairesList = Object.keys(data.horaires).map((h) => ({
-                            heure: h,
-                            passages: data.horaires[h],
-                        }));
-                        // Sort by hour (handling 00, 01 as after 23)
-                        horairesList.sort((a, b) => {
+                    // Departures come grouped by hour; sort them with the
+                    // small hours after midnight last.
+                    const horairesList = Object.keys(data.horaires)
+                        .map((h) => ({ heure: h, passages: data.horaires[h] }))
+                        .sort((a, b) => {
                             let hA = parseInt(a.heure);
                             let hB = parseInt(b.heure);
                             if (hA < 4) hA += 24;
                             if (hB < 4) hB += 24;
                             return hA - hB;
                         });
-                    }
 
                     timesHtml = horairesList
                         .map(
                             (h) => `
                     <div class="schedule-item">
-                        <div class="schedule-hour">${h.heure}</div>
-                        <div class="schedule-min">${h.passages.join(" ")}</div>
+                        <div class="schedule-hour">${esc(h.heure)}</div>
+                        <div class="schedule-min">${esc(
+                            h.passages.join(" ")
+                        )}</div>
                     </div>
                 `
                         )
@@ -327,8 +466,10 @@ class NaolibCard extends HTMLElement {
                     <div class="schedule-line-header">
                         <div class="badge" style="background-color: ${this._getLineColor(
                             line
-                        )}; margin-right: 10px;">${line}</div>
-                        <div class="schedule-dest">Vers ${direction}</div>
+                        )}; color: ${this._getLineTextColor(
+                            line
+                        )}; margin-right: 10px;">${esc(line)}</div>
+                        <div class="schedule-dest">Vers ${esc(direction)}</div>
                     </div>
                     <div class="schedule-grid">${timesHtml}</div>
                 </div>
@@ -372,6 +513,13 @@ class NaolibCard extends HTMLElement {
         return colors[line] || "var(--primary-color)";
     }
 
+    _getLineTextColor(line) {
+        // Dark text on light badge backgrounds (white is unreadable on
+        // yellow/lime/pink lines, e.g. C20).
+        const darkText = ["4", "C4", "C7", "C8", "C9", "C20"];
+        return darkText.includes(String(line)) ? "#1a1a1a" : "#ffffff";
+    }
+
     _getIconForType(type) {
         const icons = {
             1: "mdi:tram",
@@ -401,7 +549,6 @@ class NaolibCard extends HTMLElement {
             .time { font-weight: bold; font-size: 1.1em; padding: 4px 8px; border-radius: 4px; white-space: nowrap; background: rgba(127,127,127,0.1); color: var(--primary-text-color); }
             .urgent { background-color: rgba(231, 76, 60, 0.2); color: #e74c3c; }
             .warning { background-color: rgba(241, 196, 15, 0.2); color: #f1c40f; }
-            .traffic-warning { color: #f39c12; margin-left: 5px; vertical-align: middle; }
             .no-bus { padding: 10px 16px; font-style: italic; color: var(--secondary-text-color); text-align: center; }
             .card-footer { padding: 8px 16px; text-align: center; border-top: 1px solid var(--divider-color); }
             .button { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: var(--primary-color); font-weight: 500; padding: 6px 12px; border-radius: 4px; transition: background 0.2s; }
@@ -415,15 +562,28 @@ class NaolibCard extends HTMLElement {
             .schedule-item { background: rgba(127,127,127, 0.1); padding: 4px; border-radius: 4px; text-align: center; font-size: 0.9em; }
             .schedule-hour { font-weight: bold; color: var(--primary-color); }
             .schedule-min { color: var(--secondary-text-color); }
-            .times-container { display: flex; align-items: center; }
-            .time-secondary { font-size: 0.9em; color: var(--secondary-text-color); margin-left: 8px; font-weight: normal; }
+            /* Two-row grid so every marker lines up, whatever the height of
+               the time above it. */
+            .times-container { display: grid; grid-auto-flow: column; grid-template-rows: auto auto; column-gap: 10px; justify-items: end; align-items: center; }
+            .departure { display: contents; }
+            .departure > .time, .departure > .time-secondary { grid-row: 1; }
+            .departure-meta { grid-row: 2; display: flex; gap: 4px; margin-top: 4px; }
+            .time-secondary { font-size: 0.9em; color: var(--secondary-text-color); font-weight: normal; padding: 4px 0; }
+            .time-meta { font-size: 0.65em; font-weight: 700; white-space: nowrap; padding: 2px 6px; border-radius: 10px; }
+            .time-meta.late { background: rgba(231, 76, 60, 0.18); color: #e74c3c; }
+            .time-meta.early { background: rgba(39, 174, 96, 0.18); color: #27ae60; }
+            .time-meta.last { background: rgba(127,127,127,0.15); color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.5px; }
             ha-card { padding-bottom: 0; overflow: hidden; }
         `;
     }
 }
 
-if (!customElements.get("naolib-card")) {
+// The loader retries with a fresh query string, so this module can be
+// evaluated more than once per page: a second definition is not an error.
+try {
     customElements.define("naolib-card", NaolibCard);
+} catch (err) {
+    if (!customElements.get("naolib-card")) throw err;
 }
 
 class NaolibCardEditor extends HTMLElement {
@@ -460,7 +620,10 @@ class NaolibCardEditor extends HTMLElement {
         if (this._config) {
             picker.value = this._config.entity;
         }
+        // Listen to both events: newer HA versions fire "change" on
+        // pickers, older ones fire "value-changed".
         picker.addEventListener("change", this._valueChanged.bind(this));
+        picker.addEventListener("value-changed", this._valueChanged.bind(this));
     }
 
     _valueChanged(ev) {
@@ -482,8 +645,10 @@ class NaolibCardEditor extends HTMLElement {
     }
 }
 
-if (!customElements.get("naolib-card-editor")) {
+try {
     customElements.define("naolib-card-editor", NaolibCardEditor);
+} catch (err) {
+    if (!customElements.get("naolib-card-editor")) throw err;
 }
 
 window.customCards = window.customCards || [];

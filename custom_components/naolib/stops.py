@@ -47,11 +47,3 @@ def nearby_stops(
     ]
     scored.sort(key=lambda stop: stop["distance"])
     return scored[:limit]
-
-
-def get_stop(stop_id: str) -> dict[str, Any] | None:
-    """Return a stop entry by its StopPlace id."""
-    for stop in load_stops():
-        if stop["id"] == stop_id:
-            return stop
-    return None

@@ -7,7 +7,7 @@ from typing import Any
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
-from . import NaolibConfigEntry
+from . import NaolibConfigEntry, async_frontend_diagnostics
 
 TO_REDACT = {"latitude", "longitude"}
 
@@ -36,4 +36,5 @@ async def async_get_config_entry_diagnostics(
             "indexed_quays": len(network),
             "total_departures": sum(len(visits) for visits in network.values()),
         },
+        "frontend": await async_frontend_diagnostics(hass),
     }

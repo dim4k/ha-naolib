@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -20,8 +19,6 @@ from .coordinator import NaolibGlobalCoordinator, build_stop_data
 
 if TYPE_CHECKING:
     from . import NaolibConfigEntry
-
-_LOGGER = logging.getLogger(__name__)
 
 # All entities read from a single shared coordinator, so there is no per-entity
 # polling to serialize.
@@ -52,6 +49,11 @@ class NaolibNextDeparturesSensor(CoordinatorEntity[NaolibGlobalCoordinator], Sen
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_attribution = "Données Naolib / Okina"
 
+    # The departures list is volatile (rebuilt on every poll); keep it out
+    # of the recorder history to avoid bloating the database. It stays
+    # available in the state machine for the card and automations.
+    _unrecorded_attributes = frozenset({"next_departures"})
+
     def __init__(
         self,
         coordinator: NaolibGlobalCoordinator,
@@ -77,7 +79,12 @@ class NaolibNextDeparturesSensor(CoordinatorEntity[NaolibGlobalCoordinator], Sen
     def _build_stop_data(self) -> dict[str, Any]:
         """Build the per-stop data from the shared network data."""
         network = self.coordinator.data or {}
-        return build_stop_data(network, self._quays)
+        # ``self.hass`` is not set yet when __init__ runs this; the "last
+        # passage" flags then appear on the first coordinator update.
+        hass = getattr(self, "hass", None)
+        stops = hass.data.get(DOMAIN, {}).get("stops", {}) if hass else {}
+        stop = stops.get(self._stop_code) or {}
+        return build_stop_data(network, self._quays, stop.get("last_times"))
 
     @property
     def _departures(self) -> list[dict[str, Any]]:

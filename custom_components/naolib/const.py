@@ -29,6 +29,18 @@ SIRI_NAMESPACE: str = "http://www.siri.org.uk/siri"
 # Embedded stop index (generated from the GTFS feed by scripts/).
 STOPS_INDEX_FILE: str = "data/stops_index.json"
 
+# URL path serving the card's static files.
+CARD_URL_PATH: str = "/naolib_static"
+
+CARD_FILENAME: str = "naolib-card.js"
+# Thin module Home Assistant imports; it retries the card import on failure.
+LOADER_FILENAME: str = "naolib-loader.js"
+
+# config/www copy and Lovelace resource made by the 2.5.0 pre-releases,
+# cleaned up on startup.
+LEGACY_CARD_DIR: str = "naolib"
+LEGACY_CARD_URL_PATH: str = f"/local/{LEGACY_CARD_DIR}"
+
 # Embedded theoretical timetables (generated from the GTFS feed by scripts/).
 SCHEDULES_FILE: str = "data/schedules.json"
 CALENDAR_FILE: str = "data/calendar.json"

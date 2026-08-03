@@ -79,6 +79,39 @@ def active_services(calendar: dict[str, dict[str, Any]], today: date) -> set[str
     return services
 
 
+def last_departures(station_id: str, today: date) -> dict[str, str]:
+    """Return the last scheduled departure (``HHMM``) of the day, per group.
+
+    Keys are ``"{line}|{direction}"`` like the timetable group keys, so
+    realtime departures can be matched directly. Hours past midnight are
+    stored wrapped (``0005`` means 00:05), so times before 4 AM are treated
+    as the tail of the service day when picking the latest one.
+    """
+    groups = load_station_timetable(station_id)
+    if not groups:
+        return {}
+
+    services = active_services(load_calendar(), today)
+    last: dict[str, str] = {}
+
+    for group_key, group in groups.items():
+        latest: str | None = None
+        latest_key = -1
+        for service_id, service_times in group.get("services", {}).items():
+            if service_id not in services:
+                continue
+            for value in service_times:
+                hour = int(value[:2])
+                sort_key = (hour + 24 if hour < 4 else hour) * 60 + int(value[2:])
+                if sort_key > latest_key:
+                    latest_key = sort_key
+                    latest = value
+        if latest is not None:
+            last[group_key] = latest
+
+    return last
+
+
 def build_timetable(station_id: str, today: date) -> dict[str, dict[str, Any]]:
     """Build the full timetable of a station for the given date.
 
