@@ -6,13 +6,15 @@
     "description": "Build tooling for the Naolib Lovelace card.",
     "scripts": {
         "build": "node scripts/build.mjs",
-        "lint": "eslint src scripts",
-        "check": "npm run lint && npm run build"
+        "lint": "eslint src scripts tests/js",
+        "test": "vitest run",
+        "check": "npm run lint && npm run test && npm run build"
     },
     "devDependencies": {
         "@eslint/js": "^9.17.0",
         "esbuild": "^0.24.0",
         "eslint": "^9.17.0",
-        "globals": "^15.14.0"
+        "globals": "^15.14.0",
+        "vitest": "^2.1.9"
     }
 }

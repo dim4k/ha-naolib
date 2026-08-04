@@ -17,8 +17,8 @@ no YAML, no API key, no external dependency.
 -   **Real-time departures** from the official SIRI feed, with a countdown that keeps ticking between refreshes.
 -   **Delay indicator** comparing the expected time to the theoretical timetable.
 -   **Last departure of the day** flagged per line and direction, from the embedded timetable.
--   **Guided setup**: enter a location, pick your stop from the closest ones.
--   **Full daily timetable** available from the card, fetched on demand.
+-   **Guided setup**: search a stop around a location on the map, or by typing part of its name.
+-   **Full daily timetable** available from the card, fetched on demand, for today and the six days ahead.
 -   **Sensor entities** exposing every upcoming departure for your own automations.
 
 ## Requirements
@@ -46,8 +46,14 @@ Home Assistant.
 [![Add integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=naolib)
 
 Go to **Settings** > **Devices & services** > **Add integration**, search for **Naolib**,
-then confirm the location to search around (your home coordinates are pre-filled) and pick
-your stop from the nearby ones. The entities are created right away.
+then choose how to look for your stop:
+
+-   **Around a location**: confirm the point to search around (your home coordinates are
+    pre-filled) and pick your stop from the closest ones.
+-   **By name**: type part of the stop name (`comme` finds `Commerce`; case and accents are
+    ignored) and pick it from the matches.
+
+The entities are created right away.
 
 Repeat the process to follow several stops. The refresh interval, 60 seconds by default,
 can be changed between 30 and 600 seconds from the **Configure** button of the integration.
@@ -76,8 +82,10 @@ entity: sensor.<your_stop>_next_departures
 ```
 
 The card lists the two next departures per line and direction, with the delay and last
-departure markers underneath. The **Voir tous les horaires** button opens the full timetable
-for the day.
+departure markers underneath. The **Voir tous les horaires** button opens the timetable view:
+pick a line from the chips at the top, switch direction, and the whole day shows up as one
+tile per hour, scrolled to the current one with the next passage highlighted. That view is
+theoretical only — realtime belongs to the departures view above.
 
 All options are available from the visual editor:
 
@@ -163,7 +171,7 @@ The card sources live in `src/` and are bundled into `custom_components/naolib/w
 esbuild; the generated bundles are committed, so rebuild them before opening a pull request:
 
 ```bash
-npm ci && npm run check   # eslint + build
+npm ci && npm run check   # eslint + vitest + build
 pip install ruff -r requirements_test.txt
 ruff check . && ruff format --check . && pytest
 ```

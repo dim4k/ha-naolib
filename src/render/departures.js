@@ -1,36 +1,12 @@
 import { esc } from "../html.js";
-import { lineBadge, modeIcon } from "../lines.js";
+import { lineBadge, modeLabel } from "../lines.js";
+import { departureMeta, message, timeClass } from "./shared.js";
+import { ID_SCHEDULE_BTN } from "../constants.js";
 
-// Delay vs the theoretical timetable (SIRI Aimed vs Expected).
-function delayBadge(delay) {
-    if (typeof delay !== "number") return "";
-    if (delay >= 2) {
-        return `<div class="time-meta late" title="Retard vs horaire théorique">+${delay} min</div>`;
-    }
-    if (delay <= -2) {
-        return `<div class="time-meta early" title="Avance vs horaire théorique">${delay} min</div>`;
-    }
-    return "";
-}
-
-// Last scheduled passage of the day (from the GTFS timetable; the realtime
-// feed does not expose it).
-function lastBadge(isLast) {
-    if (!isLast) return "";
-    return `<div class="time-meta last" title="Dernier passage prévu aujourd'hui">dernier</div>`;
-}
-
-function timeClass(minutes) {
-    // <=1 min => urgent (red), 2-3 min => warning (orange).
-    if (minutes <= 1) return "time urgent";
-    if (minutes <= 3) return "time warning";
-    return "time";
-}
-
-// Delay and "last departure" sit under the time they describe: on the same
-// line they read like another departure.
+// Clock and "last departure" sit under the countdown they describe: on the
+// same line they would read like another departure.
 function departureHtml(item, cssClass) {
-    const meta = `${delayBadge(item.delay_minutes)}${lastBadge(item.is_last)}`;
+    const meta = departureMeta(item);
     return `
         <div class="departure">
             <div class="${cssClass}">${esc(item.time)}</div>
@@ -39,20 +15,22 @@ function departureHtml(item, cssClass) {
     `;
 }
 
-function rowHtml(departure, timesHtml) {
+function tileHtml(departure, timesHtml) {
     return `
-        <div class="row">
-            <ha-icon icon="${modeIcon(departure.type)}" class="mode-icon"></ha-icon>
+        <div class="tile">
             ${lineBadge(departure.line)}
-            <div class="dest">${esc(departure.destination)}</div>
+            <div class="tile-text">
+                <div class="dest">${esc(departure.destination)}</div>
+                <div class="tile-mode">${modeLabel(departure.type)}</div>
+            </div>
             <div class="times-container">${timesHtml}</div>
         </div>
     `;
 }
 
-function groupedRows(departures, direction, config) {
+function groupedTiles(departures, direction, config) {
     const inDirection = departures.filter((item) => item.direction === direction);
-    if (inDirection.length === 0) return `<div class="no-bus">Pas de départ</div>`;
+    if (inDirection.length === 0) return message("Pas de départ");
 
     const groups = {};
     for (const departure of inDirection) {
@@ -68,7 +46,7 @@ function groupedRows(departures, direction, config) {
             const [first, second] = group.items;
             let timesHtml = departureHtml(first, timeClass(first.minutes));
             if (second) timesHtml += departureHtml(second, "time-secondary");
-            return rowHtml(group, timesHtml);
+            return tileHtml(group, timesHtml);
         })
         .join("");
 }
@@ -77,7 +55,7 @@ function footerHtml(stopCode, config) {
     if (!stopCode || !config.show_timetable_button) return "";
     return `
         <div class="card-footer">
-            <button type="button" class="button" id="schedule-btn">
+            <button type="button" class="button" id="${ID_SCHEDULE_BTN}">
                 <ha-icon icon="mdi:clock-outline"></ha-icon>
                 Voir tous les horaires
             </button>
@@ -87,16 +65,16 @@ function footerHtml(stopCode, config) {
 
 export function renderDepartures(departures, stopCode, config) {
     if (departures.length === 0) {
-        return `<div class="no-bus">Aucun départ proche</div>${footerHtml(stopCode, config)}`;
+        return `${message("Aucun départ proche")}${footerHtml(stopCode, config)}`;
     }
 
     if (config.compact) {
-        const rows = departures
+        const tiles = departures
             .map((departure) =>
-                rowHtml(departure, departureHtml(departure, timeClass(departure.minutes))),
+                tileHtml(departure, departureHtml(departure, timeClass(departure.minutes))),
             )
             .join("");
-        return `${rows}${footerHtml(stopCode, config)}`;
+        return `<div class="tiles">${tiles}</div>${footerHtml(stopCode, config)}`;
     }
 
     const sections = [1, 2]
@@ -105,7 +83,7 @@ export function renderDepartures(departures, stopCode, config) {
         )
         .map(
             (direction) =>
-                `<div class="direction-header">Direction ${direction}</div>${groupedRows(departures, direction, config)}`,
+                `<div class="tiles"><div class="tile-group">Direction ${direction}</div>${groupedTiles(departures, direction, config)}</div>`,
         )
         .join("");
 

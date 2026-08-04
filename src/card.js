@@ -3,7 +3,18 @@ import { NaolibCardEditor } from "./editor.js";
 import { esc } from "./html.js";
 import { renderDepartures } from "./render/departures.js";
 import { renderTimetable, renderTimetableHeader } from "./render/timetable.js";
-import { styles } from "./styles.js";
+import { message } from "./render/shared.js";
+import { styles } from "./styles/index.js";
+import {
+    ATTR_DAY,
+    ATTR_DIRECTION,
+    ATTR_KEEP_SCROLL,
+    ATTR_LINE,
+    ID_BACK_BTN,
+    ID_SCHEDULE_BTN,
+    MAX_DAY_OFFSET,
+    TICK_MS,
+} from "./constants.js";
 
 // Detect a Naolib sensor by its attributes rather than its entity_id,
 // so the card keeps working even if the entity is renamed.
@@ -26,6 +37,16 @@ class NaolibCard extends HTMLElement {
     // always carries a usable configuration.
     config = normalizeConfig({});
 
+    // Timetable view state, kept in memory only: the selected line, the
+    // direction remembered for each line and the day being browsed.
+    _selectedLine = null;
+    _directionByLine = new Map();
+    _dayOffset = 0;
+    // Timetables are fetched and cached per day browsed.
+    _schedulesByDay = new Map();
+    _fetchedDays = new Set();
+    _fetchingDays = new Set();
+
     static getStubConfig(hass) {
         return { entity: findNaolibEntity(hass) || "" };
     }
@@ -46,16 +67,17 @@ class NaolibCard extends HTMLElement {
     connectedCallback() {
         // Tick the displayed times down between coordinator refreshes, so
         // the countdown stays accurate (and reaches "proche" on time)
-        // instead of aging until the next poll.
+        // instead of aging until the next poll. The timetable view ticks too:
+        // its clock and countdowns would drift otherwise.
         if (this._ticker) return;
         this._ticker = setInterval(() => {
-            if (this._showSchedule || !this._state || !this.content) return;
+            if (!this._state || !this.content) return;
             try {
                 this._render();
             } catch (err) {
                 console.error("Naolib card: render failed", err);
             }
-        }, 20000);
+        }, TICK_MS);
     }
 
     disconnectedCallback() {
@@ -87,7 +109,52 @@ class NaolibCard extends HTMLElement {
     }
 
     _message(html) {
-        this.content.innerHTML = `<div class="no-bus">${html}</div>`;
+        this.content.innerHTML = message(html);
+    }
+
+    // Replacing innerHTML wholesale loses the scroll position of the timetable
+    // containers, which the 20 s ticker would then reset on every pass.
+    _setContent(html) {
+        const saved = new Map();
+        for (const node of this.content.querySelectorAll(`[${ATTR_KEEP_SCROLL}]`)) {
+            saved.set(node.getAttribute(ATTR_KEEP_SCROLL), {
+                top: node.scrollTop,
+                left: node.scrollLeft,
+            });
+        }
+
+        this.content.innerHTML = html;
+
+        for (const node of this.content.querySelectorAll(`[${ATTR_KEEP_SCROLL}]`)) {
+            const position = saved.get(node.getAttribute(ATTR_KEEP_SCROLL));
+            if (position) {
+                node.scrollTop = position.top;
+                node.scrollLeft = position.left;
+            }
+        }
+
+        if (this._scrollToCurrentHour) {
+            // The grid is absent while the timetable is still loading; keep the
+            // request pending until it can actually be honoured.
+            this._scrollToCurrentHour = !this._scrollHoursToCurrent();
+        }
+    }
+
+    _scrollHoursToCurrent() {
+        const body = this.content.querySelector(".tt-hours");
+        if (!body) return false;
+        const cell = body.querySelector(".tt-cell.now");
+        // Another day has no current hour: start from the first departure.
+        body.scrollTop = cell ? Math.max(0, cell.offsetTop - 4) : 0;
+        return true;
+    }
+
+    _resetScheduleState() {
+        this._schedulesByDay = new Map();
+        this._fetchedDays = new Set();
+        this._selectedLine = null;
+        this._directionByLine = new Map();
+        this._dayOffset = 0;
     }
 
     _updateFromHass(hass) {
@@ -108,6 +175,16 @@ class NaolibCard extends HTMLElement {
         if (!state || !state.attributes) {
             this._message(`Entité introuvable : ${esc(entityId)}`);
             return;
+        }
+
+        // A different stop invalidates the cached timetable and any selection
+        // made against it.
+        if (
+            this._state &&
+            (this._state.entity_id !== entityId ||
+                this._state.attributes.stop_code !== state.attributes.stop_code)
+        ) {
+            this._resetScheduleState();
         }
 
         // Nothing to redraw while the sensor has not been updated.
@@ -138,29 +215,38 @@ class NaolibCard extends HTMLElement {
         this._render();
     }
 
-    _fetchSchedules() {
+    _fetchSchedules(dayOffset) {
         // Fetch the full timetable on demand, only when the schedule view
-        // is opened. Guard against concurrent calls.
-        if (this._fetching || !this._hass || !this._state) return;
+        // is opened, and once per day browsed.
+        if (!this._hass || !this._state) return;
+        if (this._fetchedDays.has(dayOffset) || this._fetchingDays.has(dayOffset)) {
+            return;
+        }
         const stopCode = this._state.attributes.stop_code;
         if (!stopCode) return;
 
-        this._fetching = true;
+        this._fetchingDays.add(dayOffset);
         this._hass
-            .callWS({ type: "naolib/get_data", stop_code: stopCode })
+            .callWS({
+                type: "naolib/get_data",
+                stop_code: stopCode,
+                day_offset: dayOffset,
+            })
             .then((data) => {
-                this._schedules = data?.schedules || {};
-                this._schedulesFetched = true;
+                this._schedulesByDay.set(dayOffset, data?.schedules || {});
+                this._fetchedDays.add(dayOffset);
                 if (this._showSchedule) this._render();
             })
             .catch((err) => {
                 console.error("Error fetching Naolib schedules:", err);
                 if (this._showSchedule) {
-                    this.content.innerHTML = `${renderTimetableHeader()}<div class="no-bus">Erreur de chargement des horaires : ${esc(err?.message || err)}</div>`;
+                    this.content.innerHTML = `${renderTimetableHeader()}${message(
+                        `Erreur de chargement des horaires : ${esc(err?.message || err)}`,
+                    )}`;
                 }
             })
             .finally(() => {
-                this._fetching = false;
+                this._fetchingDays.delete(dayOffset);
             });
     }
 
@@ -182,15 +268,67 @@ class NaolibCard extends HTMLElement {
         this.titleElement = this.shadowRoot.getElementById("title");
 
         this.content.addEventListener("click", (ev) => {
-            if (ev.target.closest("#schedule-btn")) {
-                this._showSchedule = true;
-                this._render();
-                this._fetchSchedules();
-            } else if (ev.target.closest("#back-btn")) {
-                this._showSchedule = false;
-                this._render();
+            try {
+                this._handleClick(ev);
+            } catch (err) {
+                console.error("Naolib card: interaction failed", err);
             }
         });
+    }
+
+    _handleClick(ev) {
+        const target = ev.target;
+
+        if (target.closest(`#${ID_SCHEDULE_BTN}`)) {
+            this._showSchedule = true;
+            this._dayOffset = 0;
+            this._scrollToCurrentHour = true;
+            this._render();
+            this._fetchSchedules(0);
+            return;
+        }
+
+        if (target.closest(`#${ID_BACK_BTN}`)) {
+            this._showSchedule = false;
+            this._render();
+            return;
+        }
+
+        const chip = target.closest(`[${ATTR_LINE}]`);
+        if (chip) {
+            this._selectedLine = chip.getAttribute(ATTR_LINE);
+            this._scrollToCurrentHour = true;
+            this._render();
+            return;
+        }
+
+        const day = target.closest(`[${ATTR_DAY}]`);
+        if (day) {
+            const offset = Number(day.getAttribute(ATTR_DAY));
+            if (Number.isNaN(offset) || offset < 0 || offset > MAX_DAY_OFFSET) return;
+            this._dayOffset = offset;
+            this._scrollToCurrentHour = true;
+            this._render();
+            this._fetchSchedules(offset);
+            return;
+        }
+
+        const direction = target.closest(`[${ATTR_DIRECTION}]`);
+        if (direction) {
+            // The rendered chip is the source of truth: the line may still be
+            // the default one, never explicitly picked by the user.
+            const line =
+                this._selectedLine ??
+                this.content.querySelector(".tt-chip.selected")?.getAttribute(ATTR_LINE);
+            if (line === undefined || line === null) return;
+            this._selectedLine = line;
+            this._directionByLine.set(
+                line,
+                Number(direction.getAttribute(ATTR_DIRECTION)),
+            );
+            this._scrollToCurrentHour = true;
+            this._render();
+        }
     }
 
     _updateTitle(name) {
@@ -205,22 +343,32 @@ class NaolibCard extends HTMLElement {
 
         const config = this.config;
         if (this._showSchedule) {
-            this.content.innerHTML = renderTimetable(
-                this._schedules || {},
-                !!this._schedulesFetched,
-                config,
+            this._setContent(
+                renderTimetable({
+                    schedules: this._schedulesByDay.get(this._dayOffset) || {},
+                    fetched: this._fetchedDays.has(this._dayOffset),
+                    config,
+                    selectedLine: this._selectedLine,
+                    directionByLine: this._directionByLine,
+                    dayOffset: this._dayOffset,
+                }),
             );
             return;
         }
 
-        this.content.innerHTML = renderDepartures(
-            prepareDepartures(this._state.attributes.next_departures, config),
-            this._state.attributes.stop_code,
-            config,
+        this._setContent(
+            renderDepartures(
+                prepareDepartures(this._state.attributes.next_departures, config),
+                this._state.attributes.stop_code,
+                config,
+            ),
         );
     }
 
     getCardSize() {
+        // Header, chips, direction row and the scroll-capped hour grid.
+        if (this._showSchedule) return 10;
+
         const departures = prepareDepartures(
             this._state?.attributes?.next_departures ?? [],
             this.config,

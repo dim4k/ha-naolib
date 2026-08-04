@@ -1,3 +1,6 @@
+import { MS_PER_MINUTE, STALE_SECONDS } from "./constants.js";
+import { humanizeSeconds } from "./time.js";
+
 export const DEFAULT_CONFIG = {
     entity: "",
     title: "",
@@ -63,30 +66,23 @@ export function normalizeConfig(config) {
     };
 }
 
-// Same output format as the backend _humanize().
-function humanizeSeconds(delta) {
-    if (delta <= 60) return "proche";
-    const minutes = Math.floor(delta / 60);
-    if (minutes < 60) return `${minutes} mn`;
-    const hours = Math.floor(minutes / 60);
-    return `${hours}h${String(minutes % 60).padStart(2, "0")}`;
-}
-
 // Shared by the departures and the timetable views so both honour the
-// configured filters the same way.
+// configured filters the same way. `direction` may come as a number (realtime
+// feed) or as a string (timetable group key).
 export function matchesFilters(line, direction, config) {
     if (config.lines.length) {
         const wanted = String(line ?? "").toLowerCase();
         if (!config.lines.some((l) => String(l).toLowerCase() === wanted)) return false;
     }
-    return !(config.direction && Number(direction) !== config.direction);
+    if (!config.direction) return true;
+    return Number(direction) === config.direction;
 }
 
 // Recompute the humanized times from the raw timestamps so the card ticks
 // down between coordinator refreshes, and apply the configured filters.
 // Departures more than 60 s in the past are dropped (mirrors the backend).
 export function prepareDepartures(departures, config, now = Date.now()) {
-    const earliest = now + config.walk_time * 60000;
+    const earliest = now + config.walk_time * MS_PER_MINUTE;
     const out = [];
 
     for (const departure of departures || []) {
@@ -96,7 +92,7 @@ export function prepareDepartures(departures, config, now = Date.now()) {
         if (Number.isNaN(timestamp)) continue;
         if (timestamp < earliest) continue;
         const delta = (timestamp - now) / 1000;
-        if (delta < -60) continue;
+        if (delta < -STALE_SECONDS) continue;
 
         out.push({
             ...departure,

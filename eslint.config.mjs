@@ -25,4 +25,16 @@ export default [
             globals: globals.node,
         },
     },
+    {
+        files: ["tests/js/**/*.js"],
+        languageOptions: {
+            ecmaVersion: 2022,
+            sourceType: "module",
+            globals: globals.node,
+        },
+        rules: {
+            "prefer-const": "error",
+            eqeqeq: ["error", "smart"],
+        },
+    },
 ];

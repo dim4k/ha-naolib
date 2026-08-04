@@ -5,6 +5,62 @@ var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
+// src/constants.js
+var ID_SCHEDULE_BTN = "schedule-btn";
+var ID_BACK_BTN = "back-btn";
+var ATTR_LINE = "data-line";
+var ATTR_DIRECTION = "data-direction";
+var ATTR_DAY = "data-day";
+var MAX_DAY_OFFSET = 6;
+var ATTR_KEEP_SCROLL = "data-keep-scroll";
+var MS_PER_MINUTE = 6e4;
+var TICK_MS = 2e4;
+var URGENT_MINUTES = 1;
+var WARNING_MINUTES = 3;
+var DELAY_TOLERANCE_MINUTES = 2;
+var STALE_SECONDS = 60;
+var SERVICE_DAY_CUTOFF_HOUR = 4;
+
+// src/time.js
+function humanizeSeconds(delta) {
+  if (delta <= 60) return "proche";
+  const minutes = Math.floor(delta / 60);
+  if (minutes < 60) return `${minutes} mn`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h${String(minutes % 60).padStart(2, "0")}`;
+}
+function serviceHourKey(hour) {
+  const value = parseInt(hour, 10);
+  return value < SERVICE_DAY_CUTOFF_HOUR ? value + 24 : value;
+}
+function formatClock(date) {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+var DAY_FORMAT = new Intl.DateTimeFormat("fr-FR", {
+  weekday: "long",
+  day: "numeric",
+  month: "long"
+});
+function formatDay(date) {
+  const label = DAY_FORMAT.format(date);
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+function relativeDay(offset) {
+  if (offset === 0) return "Aujourd'hui";
+  if (offset === 1) return "Demain";
+  if (offset === 2) return "Après-demain";
+  return `Dans ${offset} jours`;
+}
+function passageDate(now, hour, minute) {
+  const reference = new Date(now);
+  const date = new Date(now);
+  date.setHours(hour, minute, 0, 0);
+  if (hour < SERVICE_DAY_CUTOFF_HOUR && reference.getHours() >= SERVICE_DAY_CUTOFF_HOUR) {
+    date.setDate(date.getDate() + 1);
+  }
+  return date;
+}
+
 // src/config.js
 var DEFAULT_CONFIG = {
   entity: "",
@@ -21,8 +77,8 @@ var DEFAULT_CONFIG = {
 };
 var MAX_LINES_LIMIT = 30;
 var MAX_WALK_TIME = 60;
-function invalid(message) {
-  throw new Error(`naolib-card: ${message}`);
+function invalid(message2) {
+  throw new Error(`naolib-card: ${message2}`);
 }
 function asInteger(value, name, min, max) {
   const number = Number(value);
@@ -62,30 +118,24 @@ function normalizeConfig(config) {
     compact: asBoolean(raw.compact, "compact")
   };
 }
-function humanizeSeconds(delta) {
-  if (delta <= 60) return "proche";
-  const minutes = Math.floor(delta / 60);
-  if (minutes < 60) return `${minutes} mn`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h${String(minutes % 60).padStart(2, "0")}`;
-}
 function matchesFilters(line, direction, config) {
   if (config.lines.length) {
     const wanted = String(line ?? "").toLowerCase();
     if (!config.lines.some((l) => String(l).toLowerCase() === wanted)) return false;
   }
-  return !(config.direction && Number(direction) !== config.direction);
+  if (!config.direction) return true;
+  return Number(direction) === config.direction;
 }
-function prepareDepartures(departures, config, now = Date.now()) {
-  const earliest = now + config.walk_time * 6e4;
+function prepareDepartures(departures2, config, now = Date.now()) {
+  const earliest = now + config.walk_time * MS_PER_MINUTE;
   const out = [];
-  for (const departure of departures || []) {
+  for (const departure of departures2 || []) {
     if (!matchesFilters(departure.line, departure.direction, config)) continue;
     const timestamp = Date.parse(departure.expected_ts);
     if (Number.isNaN(timestamp)) continue;
     if (timestamp < earliest) continue;
     const delta = (timestamp - now) / 1e3;
-    if (delta < -60) continue;
+    if (delta < -STALE_SECONDS) continue;
     out.push({
       ...departure,
       time: humanizeSeconds(delta),
@@ -117,9 +167,9 @@ var HELPERS = {
 };
 function lineOptions(hass, config) {
   const state = hass.states[config.entity];
-  const departures = state?.attributes?.next_departures || [];
+  const departures2 = state?.attributes?.next_departures || [];
   const lines = new Set(
-    departures.map((departure) => String(departure.line ?? "")).filter(Boolean)
+    departures2.map((departure) => String(departure.line ?? "")).filter(Boolean)
   );
   for (const line of config.lines) lines.add(String(line));
   return [...lines].sort((a, b) => a.localeCompare(b, void 0, { numeric: true })).map((line) => ({ value: line, label: line }));
@@ -270,43 +320,50 @@ var LINE_COLORS = {
   NA: "#2ecc71"
 };
 var DARK_TEXT_LINES = ["4", "C4", "C7", "C8", "C9", "C20"];
-var MODE_ICONS = {
-  1: "mdi:tram",
-  2: "mdi:bus-articulated-front",
-  3: "mdi:bus",
-  4: "mdi:ferry"
+var MODE_LABELS = {
+  1: "Tramway",
+  2: "Busway",
+  3: "Bus",
+  4: "Navibus"
 };
 function lineBadge(line) {
   const background = LINE_COLORS[line] || "var(--primary-color)";
   const color = DARK_TEXT_LINES.includes(String(line)) ? "#1a1a1a" : "#ffffff";
   return `<div class="badge" style="background-color: ${background}; color: ${color};" title="Ligne ${esc(line)}">${esc(line)}</div>`;
 }
-function modeIcon(type) {
-  return MODE_ICONS[type] || "mdi:bus";
+function modeLabel(type) {
+  return MODE_LABELS[type] || "Bus";
+}
+
+// src/render/shared.js
+function message(html) {
+  return `<div class="no-bus">${html}</div>`;
+}
+function timeClass(minutes) {
+  if (minutes <= URGENT_MINUTES) return "time urgent";
+  if (minutes <= WARNING_MINUTES) return "time warning";
+  return "time";
+}
+function clockHtml(expected, delay) {
+  const real = formatClock(new Date(expected));
+  if (typeof delay !== "number" || Math.abs(delay) < DELAY_TOLERANCE_MINUTES) {
+    return `<span class="clock">${real}</span>`;
+  }
+  const aimed = formatClock(new Date(expected - delay * 6e4));
+  const state = delay > 0 ? "late" : "early";
+  const title = delay > 0 ? `${delay} min de retard sur l'horaire théorique` : `${-delay} min d'avance sur l'horaire théorique`;
+  return `<span class="clock aimed">${aimed}</span><span class="clock ${state}" title="${title}">${real}</span>`;
+}
+function departureMeta(item) {
+  const expected = Date.parse(item.expected_ts);
+  if (Number.isNaN(expected)) return "";
+  const last = item.is_last ? `<span class="time-meta last" title="Dernier passage prévu aujourd'hui">dernier</span>` : "";
+  return `${last}${clockHtml(expected, item.delay_minutes)}`;
 }
 
 // src/render/departures.js
-function delayBadge(delay) {
-  if (typeof delay !== "number") return "";
-  if (delay >= 2) {
-    return `<div class="time-meta late" title="Retard vs horaire théorique">+${delay} min</div>`;
-  }
-  if (delay <= -2) {
-    return `<div class="time-meta early" title="Avance vs horaire théorique">${delay} min</div>`;
-  }
-  return "";
-}
-function lastBadge(isLast) {
-  if (!isLast) return "";
-  return `<div class="time-meta last" title="Dernier passage prévu aujourd'hui">dernier</div>`;
-}
-function timeClass(minutes) {
-  if (minutes <= 1) return "time urgent";
-  if (minutes <= 3) return "time warning";
-  return "time";
-}
 function departureHtml(item, cssClass) {
-  const meta = `${delayBadge(item.delay_minutes)}${lastBadge(item.is_last)}`;
+  const meta = departureMeta(item);
   return `
         <div class="departure">
             <div class="${cssClass}">${esc(item.time)}</div>
@@ -314,19 +371,21 @@ function departureHtml(item, cssClass) {
         </div>
     `;
 }
-function rowHtml(departure, timesHtml) {
+function tileHtml(departure, timesHtml) {
   return `
-        <div class="row">
-            <ha-icon icon="${modeIcon(departure.type)}" class="mode-icon"></ha-icon>
+        <div class="tile">
             ${lineBadge(departure.line)}
-            <div class="dest">${esc(departure.destination)}</div>
+            <div class="tile-text">
+                <div class="dest">${esc(departure.destination)}</div>
+                <div class="tile-mode">${modeLabel(departure.type)}</div>
+            </div>
             <div class="times-container">${timesHtml}</div>
         </div>
     `;
 }
-function groupedRows(departures, direction, config) {
-  const inDirection = departures.filter((item) => item.direction === direction);
-  if (inDirection.length === 0) return `<div class="no-bus">Pas de départ</div>`;
+function groupedTiles(departures2, direction, config) {
+  const inDirection = departures2.filter((item) => item.direction === direction);
+  if (inDirection.length === 0) return message("Pas de départ");
   const groups = {};
   for (const departure of inDirection) {
     const key = `${departure.line}-${departure.destination}`;
@@ -337,145 +396,383 @@ function groupedRows(departures, direction, config) {
     const [first, second] = group.items;
     let timesHtml = departureHtml(first, timeClass(first.minutes));
     if (second) timesHtml += departureHtml(second, "time-secondary");
-    return rowHtml(group, timesHtml);
+    return tileHtml(group, timesHtml);
   }).join("");
 }
 function footerHtml(stopCode, config) {
   if (!stopCode || !config.show_timetable_button) return "";
   return `
         <div class="card-footer">
-            <button type="button" class="button" id="schedule-btn">
+            <button type="button" class="button" id="${ID_SCHEDULE_BTN}">
                 <ha-icon icon="mdi:clock-outline"></ha-icon>
                 Voir tous les horaires
             </button>
         </div>
     `;
 }
-function renderDepartures(departures, stopCode, config) {
-  if (departures.length === 0) {
-    return `<div class="no-bus">Aucun départ proche</div>${footerHtml(stopCode, config)}`;
+function renderDepartures(departures2, stopCode, config) {
+  if (departures2.length === 0) {
+    return `${message("Aucun départ proche")}${footerHtml(stopCode, config)}`;
   }
   if (config.compact) {
-    const rows = departures.map(
-      (departure) => rowHtml(departure, departureHtml(departure, timeClass(departure.minutes)))
+    const tiles = departures2.map(
+      (departure) => tileHtml(departure, departureHtml(departure, timeClass(departure.minutes)))
     ).join("");
-    return `${rows}${footerHtml(stopCode, config)}`;
+    return `<div class="tiles">${tiles}</div>${footerHtml(stopCode, config)}`;
   }
   const sections = [1, 2].filter(
-    (direction) => departures.some((item) => item.direction === direction)
+    (direction) => departures2.some((item) => item.direction === direction)
   ).map(
-    (direction) => `<div class="direction-header">Direction ${direction}</div>${groupedRows(departures, direction, config)}`
+    (direction) => `<div class="tiles"><div class="tile-group">Direction ${direction}</div>${groupedTiles(departures2, direction, config)}</div>`
   ).join("");
   return `${sections}${footerHtml(stopCode, config)}`;
 }
 
 // src/render/timetable.js
-function renderTimetableHeader() {
+function renderTimetableHeader(extra = "") {
   return `
         <div class="card-header schedule-header">
-            <button type="button" class="icon-button" id="back-btn" aria-label="Retour aux prochains départs">
+            <button type="button" class="icon-button" id="${ID_BACK_BTN}" aria-label="Retour aux prochains départs">
                 <ha-icon icon="mdi:arrow-left"></ha-icon>
             </button>
-            <span>Horaires</span>
+            <span class="tt-title">Horaires</span>
+            ${extra}
         </div>
     `;
 }
-function hourRows(horaires) {
-  if (!horaires) return "";
-  return Object.keys(horaires).map((hour) => ({ hour, passages: horaires[hour] })).sort((a, b) => {
-    const hourA = parseInt(a.hour, 10);
-    const hourB = parseInt(b.hour, 10);
-    return (hourA < 4 ? hourA + 24 : hourA) - (hourB < 4 ? hourB + 24 : hourB);
-  }).map(
-    (entry) => `
-                <div class="schedule-item">
-                    <div class="schedule-hour">${esc(entry.hour)}</div>
-                    <div class="schedule-min">${esc(entry.passages.join(" "))}</div>
-                </div>
-            `
-  ).join("");
-}
-function renderTimetable(schedules, fetched, config) {
-  const keys = Object.keys(schedules).filter((key) => {
+function groupSchedules(schedules, config) {
+  const byLine = /* @__PURE__ */ new Map();
+  for (const key of Object.keys(schedules || {})) {
     const [line, direction] = key.split("|");
-    return matchesFilters(line, direction, config);
-  });
-  if (keys.length === 0) {
-    const message = fetched ? "Aucun horaire aujourd'hui" : "Chargement des horaires...";
-    return `${renderTimetableHeader()}<div class="no-bus">${message}</div>`;
-  }
-  const listHtml = keys.sort(
-    (a, b) => String(schedules[a].ligne.numLigne).localeCompare(
-      String(schedules[b].ligne.numLigne),
-      void 0,
-      { numeric: true }
-    )
-  ).map((key) => {
+    if (!matchesFilters(line, direction, config)) continue;
     const data = schedules[key];
-    const line = data.ligne.numLigne;
-    const direction = data.direction_label || `Sens ${data.ligne.direction}`;
+    if (!data) continue;
+    if (!byLine.has(line)) byLine.set(line, { line, directions: [] });
+    byLine.get(line).directions.push({
+      key,
+      line,
+      direction: Number(direction),
+      label: data.direction_label || `Sens ${direction}`,
+      horaires: data.horaires || {}
+    });
+  }
+  return [...byLine.values()].sort(
+    (a, b) => String(a.line).localeCompare(String(b.line), void 0, { numeric: true })
+  ).map((group) => ({
+    ...group,
+    directions: group.directions.sort((a, b) => a.direction - b.direction)
+  }));
+}
+function resolveSelection(groups, selectedLine, directionByLine) {
+  if (!groups.length) return null;
+  const group = groups.find((item) => item.line === selectedLine) || groups[0];
+  const wanted = directionByLine?.get(group.line);
+  const entry = group.directions.find((item) => item.direction === wanted) || group.directions[0];
+  return { group, entry };
+}
+function theoreticalTimestamps(horaires, now) {
+  const out = [];
+  for (const hour of Object.keys(horaires || {})) {
+    const hourValue = parseInt(hour, 10);
+    if (Number.isNaN(hourValue)) continue;
+    for (const minute of horaires[hour] || []) {
+      const minuteValue = parseInt(minute, 10);
+      if (Number.isNaN(minuteValue)) continue;
+      out.push(passageDate(now, hourValue, minuteValue).getTime());
+    }
+  }
+  return out.sort((a, b) => a - b);
+}
+function nextTimestamp(horaires, now) {
+  return theoreticalTimestamps(horaires, now).find(
+    (timestamp) => timestamp >= now
+  );
+}
+function firstSlot(horaires) {
+  const hours = Object.keys(horaires || {}).sort(
+    (a, b) => serviceHourKey(a) - serviceHourKey(b)
+  );
+  const hour = hours[0];
+  if (hour === void 0) return "";
+  const minutes = [...horaires[hour] || []].sort();
+  if (!minutes.length) return "";
+  return `${String(hour).padStart(2, "0")}:${minutes[0]}`;
+}
+function section(label, body) {
+  return `<div class="tt-section"><div class="tt-label">${label}</div>${body}</div>`;
+}
+function emptyMessage(live) {
+  return live ? "Aucun horaire aujourd'hui" : "Aucun horaire ce jour-là";
+}
+function renderChips(groups, selectedLine) {
+  const chips = groups.map((group) => {
+    const selected = group.line === selectedLine;
+    return `<button type="button" class="tt-chip${selected ? " selected" : ""}" ${ATTR_LINE}="${esc(group.line)}" aria-pressed="${selected}">${lineBadge(group.line)}</button>`;
+  }).join("");
+  return `<div class="tt-chips" role="group" aria-label="Lignes">${chips}</div>`;
+}
+function renderDirection(group, entry) {
+  const other = group.directions.find((item) => item.direction !== entry.direction) || null;
+  const swap = other ? `<button type="button" class="tt-swap" ${ATTR_DIRECTION}="${other.direction}" aria-label="Voir la direction ${esc(other.label)}">
+                <ha-icon icon="mdi:swap-horizontal"></ha-icon>
+                <span>${esc(other.label)}</span>
+            </button>` : "";
+  return `
+        <div class="tt-section tt-dir-section">
+            <div class="tt-to">
+                <ha-icon class="tt-to-arrow" icon="mdi:arrow-right"></ha-icon>
+                <div class="tt-to-text">
+                    <div class="tt-label">Direction</div>
+                    <div class="tt-to-name">${esc(entry.label)}</div>
+                </div>
+                ${swap}
+            </div>
+        </div>
+    `;
+}
+function renderNext(horaires, now, next, live) {
+  if (live) {
+    if (next === void 0) return "";
+    const relative = humanizeSeconds((next - now) / 1e3);
     return `
-                <div class="schedule-group">
-                    <div class="schedule-line-header">
-                        ${lineBadge(line)}
-                        <div class="schedule-dest">Vers ${esc(direction)}</div>
-                    </div>
-                    <div class="schedule-grid">${hourRows(data.horaires)}</div>
+            <div class="tt-section tt-next-section">
+                <div class="tt-next">
+                    <span class="tt-label">Prochain</span>
+                    <span class="tt-next-time">${formatClock(new Date(next))}</span>
+                    <span class="tt-next-rel">${relative === "proche" ? "proche" : `dans ${relative}`}</span>
+                </div>
+            </div>
+        `;
+  }
+  const first = firstSlot(horaires);
+  if (!first) return "";
+  return `
+        <div class="tt-section tt-next-section">
+            <div class="tt-next">
+                <span class="tt-label">Premier départ</span>
+                <span class="tt-next-time">${first}</span>
+            </div>
+        </div>
+    `;
+}
+function renderDays(dayOffset, now) {
+  const date = new Date(now);
+  date.setDate(date.getDate() + dayOffset);
+  const nav = (offset, label, iconName, disabled) => `<button type="button" class="tt-day-nav" ${ATTR_DAY}="${offset}" aria-label="${label}"${disabled ? " disabled" : ""}><ha-icon icon="mdi:chevron-${iconName}"></ha-icon></button>`;
+  return `
+        <div class="tt-section tt-day-section">
+            <div class="tt-label">Jour</div>
+            <div class="tt-day">
+                ${nav(dayOffset - 1, "Jour précédent", "left", dayOffset <= 0)}
+                <div class="tt-day-text">
+                    <div class="tt-day-date">${esc(formatDay(date))}</div>
+                    <div class="tt-day-rel">${esc(relativeDay(dayOffset))}</div>
+                </div>
+                ${nav(dayOffset + 1, "Jour suivant", "right", dayOffset >= MAX_DAY_OFFSET)}
+            </div>
+        </div>
+    `;
+}
+function renderHours(horaires, now, next, live) {
+  const hours = Object.keys(horaires || {}).sort(
+    (a, b) => serviceHourKey(a) - serviceHourKey(b)
+  );
+  if (!hours.length) return message(emptyMessage(live));
+  const currentHourKey = live ? serviceHourKey(new Date(next ?? now).getHours()) : null;
+  const cells = hours.map((hour) => {
+    const key = serviceHourKey(hour);
+    const state = currentHourKey === null ? "" : key === currentHourKey ? "now" : key < currentHourKey ? "past" : "";
+    const minutes = (horaires[hour] || []).map((minute) => {
+      const timestamp = passageDate(
+        now,
+        parseInt(hour, 10),
+        parseInt(minute, 10)
+      ).getTime();
+      const modifier = !live ? "" : timestamp === next ? " next" : timestamp < now ? " past" : "";
+      return `<span class="tt-min${modifier}">${esc(minute)}</span>`;
+    }).join("");
+    return `
+                <div class="tt-cell ${state}">
+                    <div class="tt-cell-hour">${esc(hour)}<small>h</small></div>
+                    <div class="tt-mins">${minutes}</div>
                 </div>
             `;
   }).join("");
-  return `${renderTimetableHeader()}<div class="schedule-container">${listHtml}</div>`;
+  return section(
+    "Horaires du jour",
+    `<div class="tt-hours" ${ATTR_KEEP_SCROLL}="hours"><div class="tt-grid">${cells}</div></div>`
+  );
+}
+function renderTimetable({
+  schedules,
+  fetched,
+  config,
+  selectedLine,
+  directionByLine,
+  dayOffset = 0,
+  now = Date.now()
+}) {
+  const groups = groupSchedules(schedules, config);
+  const live = dayOffset === 0;
+  if (!groups.length) {
+    return [
+      renderTimetableHeader(),
+      renderDays(dayOffset, now),
+      message(
+        fetched ? emptyMessage(live) : "Chargement des horaires..."
+      )
+    ].join("");
+  }
+  const { group, entry } = resolveSelection(groups, selectedLine, directionByLine);
+  const next = live ? nextTimestamp(entry.horaires, now) : void 0;
+  return [
+    renderTimetableHeader(renderChips(groups, group.line)),
+    renderDirection(group, entry),
+    renderNext(entry.horaires, now, next, live),
+    renderDays(dayOffset, now),
+    renderHours(entry.horaires, now, next, live)
+  ].join("");
 }
 
-// src/styles.js
-var styles = `
-    :host { font-family: Roboto, sans-serif; }
+// src/styles/base.js
+var base = `
+    :host {
+        font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif);
+        --naolib-radius: 10px;
+        --naolib-urgent: #e74c3c;
+        --naolib-warning: #f1c40f;
+        --naolib-early: #27ae60;
+        --naolib-neutral: rgba(127, 127, 127, 0.1);
+        --naolib-neutral-strong: rgba(127, 127, 127, 0.18);
+        --naolib-scroll-thumb: rgba(127, 127, 127, 0.35);
+        --naolib-scroll-thumb-hover: rgba(127, 127, 127, 0.55);
+    }
+    ha-card { padding-bottom: 0; overflow: hidden; }
     .card-header { padding: 16px; font-weight: bold; font-size: 1.2em; display: flex; align-items: center; }
-    .schedule-header { border-bottom: 1px solid var(--divider-color); padding-bottom: 10px; margin-bottom: 10px; }
     .icon { margin-right: 10px; color: var(--primary-color); }
-    .direction-header { font-size: 0.85em; text-transform: uppercase; color: var(--secondary-text-color); margin: 10px 16px 5px; border-bottom: 1px solid var(--divider-color); padding-bottom: 4px; letter-spacing: 1px; }
-    .row { display: flex; align-items: center; padding: 8px 16px; border-bottom: 1px solid rgba(127,127,127, 0.1); }
-    .badge { background-color: var(--primary-color); color: white; font-weight: bold; padding: 4px 8px; border-radius: 6px; min-width: 25px; text-align: center; margin-right: 12px; font-size: 1.1em; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
-    .mode-icon { color: var(--secondary-text-color); margin-right: 8px; --mdc-icon-size: 20px; }
-    .dest { flex-grow: 1; font-size: 1.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: 10px; }
-    .time { font-weight: bold; font-size: 1.1em; padding: 4px 8px; border-radius: 4px; white-space: nowrap; background: rgba(127,127,127,0.1); color: var(--primary-text-color); }
-    .urgent { background-color: rgba(231, 76, 60, 0.2); color: #e74c3c; }
-    .warning { background-color: rgba(241, 196, 15, 0.2); color: #f1c40f; }
+    .badge { font-weight: bold; padding: 4px 8px; border-radius: 6px; min-width: 25px; text-align: center; margin-right: 12px; font-size: 1.1em; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
     .no-bus { padding: 10px 16px; font-style: italic; color: var(--secondary-text-color); text-align: center; }
-    .card-footer { padding: 8px 16px; text-align: center; border-top: 1px solid var(--divider-color); }
+    .time { font-weight: bold; font-size: 1.1em; padding: 4px 8px; border-radius: 4px; white-space: nowrap; background: var(--naolib-neutral); color: var(--primary-text-color); }
+    .urgent { background-color: rgba(231, 76, 60, 0.2); color: var(--naolib-urgent); }
+    .warning { background-color: rgba(241, 196, 15, 0.2); color: var(--naolib-warning); }
+    .time-meta { font-size: 0.65em; font-weight: 700; white-space: nowrap; padding: 2px 6px; border-radius: 10px; }
+    .time-meta.last { background: var(--naolib-neutral-strong); color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.5px; }
     .button { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: var(--primary-color); font-weight: 500; padding: 6px 12px; border-radius: 4px; transition: background 0.2s; background: none; border: none; font-family: inherit; font-size: inherit; }
     .button:hover { background-color: rgba(var(--rgb-primary-color), 0.1); }
     .button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
     .button ha-icon { margin-right: 6px; --mdc-icon-size: 18px; }
     .icon-button { cursor: pointer; background: none; border: none; padding: 0; margin-right: 10px; color: var(--primary-color); display: inline-flex; }
     .icon-button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
-    .schedule-container { padding: 0 16px 16px; max-height: 400px; overflow-y: auto; }
-    .schedule-group { margin-bottom: 20px; }
-    .schedule-line-header { display: flex; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(127,127,127,0.1); padding-bottom: 4px; }
-    .schedule-line-header .badge { margin-right: 10px; }
-    .schedule-dest { font-weight: 500; font-size: 1.1em; }
-    .schedule-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 8px; }
-    .schedule-item { background: rgba(127,127,127, 0.1); padding: 4px; border-radius: 4px; text-align: center; font-size: 0.9em; }
-    .schedule-hour { font-weight: bold; color: var(--primary-color); }
-    .schedule-min { color: var(--secondary-text-color); }
+    .card-footer { padding: 8px 16px; text-align: center; border-top: 1px solid var(--divider-color); }
+    :host([compact]) .card-header { padding: 12px 16px 4px; font-size: 1.05em; }
+    :host([compact]) .badge { font-size: 0.95em; padding: 2px 6px; margin-right: 8px; }
+    :host([compact]) .time { font-size: 1em; }
+`;
+
+// src/styles/departures.js
+var departures = `
+    .tiles { display: grid; gap: 8px; padding: 12px 16px; }
+    .tiles + .tiles { padding-top: 0; }
+    .tile-group { font-size: 0.68em; font-weight: 500; text-transform: uppercase; letter-spacing: 0.9px; color: var(--secondary-text-color); }
+    .tile { display: flex; align-items: center; gap: 10px; background: var(--naolib-neutral); border-radius: var(--naolib-radius); padding: 10px 12px; }
+    .tile .badge { margin-right: 0; }
+    .tile-text { flex: 1; min-width: 0; }
+    .tile-mode { font-size: 0.72em; color: var(--secondary-text-color); }
+    .dest { font-size: 1.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     /* Two-row grid so every marker lines up, whatever the height of
        the time above it. */
     .times-container { display: grid; grid-auto-flow: column; grid-template-rows: auto auto; column-gap: 10px; justify-items: end; align-items: center; }
     .departure { display: contents; }
     .departure > .time, .departure > .time-secondary { grid-row: 1; }
-    .departure-meta { grid-row: 2; display: flex; gap: 4px; margin-top: 4px; }
+    .departure-meta { grid-row: 2; display: flex; align-items: center; gap: 4px; margin-top: 3px; }
+    .clock { font-size: 0.72em; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; white-space: nowrap; padding: 2px 6px; border-radius: 10px; background: var(--naolib-neutral-strong); }
+    .clock.aimed { background: none; padding: 2px 0; text-decoration: line-through; opacity: 0.7; }
+    .clock.late, .clock.early { font-weight: 700; }
+    .clock.late { background: rgba(231, 76, 60, 0.18); color: var(--naolib-urgent); }
+    .clock.early { background: rgba(39, 174, 96, 0.18); color: var(--naolib-early); }
     .time-secondary { font-size: 0.9em; color: var(--secondary-text-color); font-weight: normal; padding: 4px 0; }
-    .time-meta { font-size: 0.65em; font-weight: 700; white-space: nowrap; padding: 2px 6px; border-radius: 10px; }
-    .time-meta.late { background: rgba(231, 76, 60, 0.18); color: #e74c3c; }
-    .time-meta.early { background: rgba(39, 174, 96, 0.18); color: #27ae60; }
-    .time-meta.last { background: rgba(127,127,127,0.15); color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.5px; }
-    /* Compact mode: one line per departure, no grouping. */
-    :host([compact]) .card-header { padding: 12px 16px 4px; font-size: 1.05em; }
-    :host([compact]) .row { padding: 4px 16px; }
-    :host([compact]) .badge { font-size: 0.95em; padding: 2px 6px; margin-right: 8px; }
-    :host([compact]) .time { font-size: 1em; }
-    ha-card { padding-bottom: 0; overflow: hidden; }
+    :host([compact]) .tiles { gap: 6px; padding: 8px 16px; }
+    :host([compact]) .tile { padding: 6px 10px; }
 `;
+
+// src/styles/timetable.js
+var timetable = `
+    .schedule-header { padding-bottom: 10px; margin-bottom: 12px; gap: 8px; flex-wrap: wrap; }
+    .tt-title { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .schedule-header .tt-chips { flex: 1 1 auto; min-width: 0; justify-content: flex-end; }
+
+    .tt-section { padding: 0 16px; margin-bottom: 16px; }
+    .tt-section:last-child { margin-bottom: 0; padding-bottom: 16px; }
+    /* The separators frame the "next passage" banner, as in the mock-up. */
+    .tt-dir-section { padding-bottom: 12px; margin-bottom: 0; border-bottom: 1px solid var(--divider-color); }
+    .tt-next-section { padding: 10px 16px; margin-bottom: 14px; border-bottom: 1px solid var(--divider-color); }
+    .tt-label { font-size: 0.68em; font-weight: 500; text-transform: uppercase; letter-spacing: 0.9px; color: var(--secondary-text-color); margin-bottom: 6px; }
+
+    .tt-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tt-chip { display: inline-flex; flex: 0 0 auto; cursor: pointer; background: none; border: none; padding: 3px; border-radius: var(--naolib-radius); opacity: 0.5; filter: grayscale(0.55); transition: opacity 0.15s, filter 0.15s; }
+    .tt-chip .badge { margin-right: 0; }
+    .tt-chip:hover { opacity: 0.85; filter: none; }
+    /* Inset ring rather than an outline: it stays inside the button box, so it
+       is never clipped when compact mode shrinks the badge. */
+    .tt-chip.selected { opacity: 1; filter: none; box-shadow: inset 0 0 0 2px var(--primary-color); }
+    .tt-chip:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
+
+    .tt-to { display: flex; align-items: center; gap: 10px; background: rgba(var(--rgb-primary-color), 0.1); border: 1px solid rgba(var(--rgb-primary-color), 0.35); border-radius: var(--naolib-radius); padding: 8px 10px; }
+    .tt-to-arrow { color: var(--primary-color); --mdc-icon-size: 20px; flex: none; }
+    .tt-to-text { flex: 1; min-width: 0; }
+    .tt-to-text .tt-label { margin-bottom: 0; }
+    .tt-to-name { font-weight: 600; color: var(--primary-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tt-swap { display: inline-flex; align-items: center; gap: 4px; max-width: 45%; cursor: pointer; border: none; background: none; padding: 5px 6px; border-radius: 8px; font-family: inherit; font-size: 0.78em; color: var(--secondary-text-color); transition: background 0.15s, color 0.15s; }
+    .tt-swap span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tt-swap ha-icon { --mdc-icon-size: 16px; flex: none; }
+    .tt-swap:hover { background: rgba(var(--rgb-primary-color), 0.12); color: var(--primary-color); }
+    .tt-swap:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+
+    .tt-next { display: flex; align-items: baseline; gap: 8px; }
+    .tt-next .tt-label { margin-bottom: 0; }
+    .tt-next-time { font-size: 1.25em; font-weight: 700; color: var(--primary-color); font-variant-numeric: tabular-nums; }
+    .tt-next-rel { font-size: 0.85em; color: var(--secondary-text-color); }
+
+    .tt-day-section { margin-bottom: 12px; }
+    .tt-day { display: flex; align-items: center; gap: 8px; background: var(--naolib-neutral); border-radius: var(--naolib-radius); padding: 4px; }
+    .tt-day-nav { display: inline-flex; cursor: pointer; border: none; background: none; color: var(--primary-color); border-radius: 8px; padding: 5px; transition: background 0.15s; }
+    .tt-day-nav:hover:not([disabled]) { background: rgba(var(--rgb-primary-color), 0.12); }
+    .tt-day-nav[disabled] { color: var(--secondary-text-color); opacity: 0.4; cursor: default; }
+    .tt-day-nav:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+    .tt-day-text { flex: 1; min-width: 0; text-align: center; }
+    .tt-day-date { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tt-day-rel { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.6px; color: var(--secondary-text-color); }
+
+    /* Both syntaxes on purpose: Chromium 121+ and Firefox honour the standard
+       properties, older Chromium falls back to the -webkit- pseudo-elements. */
+    /* The negative margin compensates the padding, which keeps the grid aligned
+       with the other sections while leaving room for the "now" ring and the
+       last row at full scroll. */
+    .tt-hours { max-height: 380px; overflow-y: auto; overscroll-behavior: contain; position: relative; margin: 0 -4px; padding: 4px 12px 6px 4px; scrollbar-width: thin; scrollbar-color: var(--naolib-scroll-thumb) transparent; }
+    .tt-hours::-webkit-scrollbar { width: 8px; }
+    .tt-hours::-webkit-scrollbar-track { background: transparent; }
+    .tt-hours::-webkit-scrollbar-thumb { background: var(--naolib-scroll-thumb); border: 2px solid transparent; background-clip: content-box; border-radius: 4px; }
+    .tt-hours::-webkit-scrollbar-thumb:hover { background: var(--naolib-scroll-thumb-hover); background-clip: content-box; }
+    .tt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px; }
+    .tt-cell { background: var(--naolib-neutral); border: 1px solid transparent; border-radius: var(--naolib-radius); padding: 6px 8px 8px; }
+    .tt-cell.past { opacity: 0.42; }
+    /* Inset ring rather than an outer glow: it stays inside the cell box, so
+       the scroll container never clips it. */
+    .tt-cell.now { background: rgba(var(--rgb-primary-color), 0.1); border-color: var(--primary-color); box-shadow: inset 0 0 0 2px rgba(var(--rgb-primary-color), 0.25); }
+    .tt-cell-hour { font-size: 1.05em; font-weight: 700; color: var(--primary-color); font-variant-numeric: tabular-nums; padding-bottom: 4px; margin-bottom: 4px; border-bottom: 1px solid rgba(var(--rgb-primary-color), 0.2); }
+    .tt-cell-hour small { font-size: 0.7em; font-weight: 400; opacity: 0.7; }
+    .tt-mins { display: flex; flex-wrap: wrap; gap: 2px 6px; }
+    .tt-min { min-width: 1.5em; text-align: center; font-size: 0.9em; font-variant-numeric: tabular-nums; color: var(--primary-text-color); }
+    .tt-min.past { color: var(--secondary-text-color); opacity: 0.55; }
+    .tt-min.next { background: var(--primary-color); color: #fff; font-weight: 700; border-radius: 5px; padding: 0 3px; margin: 0 -3px; }
+
+    :host([compact]) .tt-hours { max-height: 260px; }
+    :host([compact]) .tt-cell { padding: 4px 6px 6px; }
+    :host([compact]) .tt-min { font-size: 0.85em; }
+`;
+
+// src/styles/index.js
+var styles = [base, departures, timetable].join("\n");
 
 // src/card.js
 function isNaolibEntity(state) {
@@ -492,6 +789,15 @@ var NaolibCard = class extends HTMLElement {
     // `hass` can be set before `setConfig` (mobile reconnections), so the card
     // always carries a usable configuration.
     __publicField(this, "config", normalizeConfig({}));
+    // Timetable view state, kept in memory only: the selected line, the
+    // direction remembered for each line and the day being browsed.
+    __publicField(this, "_selectedLine", null);
+    __publicField(this, "_directionByLine", /* @__PURE__ */ new Map());
+    __publicField(this, "_dayOffset", 0);
+    // Timetables are fetched and cached per day browsed.
+    __publicField(this, "_schedulesByDay", /* @__PURE__ */ new Map());
+    __publicField(this, "_fetchedDays", /* @__PURE__ */ new Set());
+    __publicField(this, "_fetchingDays", /* @__PURE__ */ new Set());
   }
   static getStubConfig(hass) {
     return { entity: findNaolibEntity(hass) || "" };
@@ -508,13 +814,13 @@ var NaolibCard = class extends HTMLElement {
   connectedCallback() {
     if (this._ticker) return;
     this._ticker = setInterval(() => {
-      if (this._showSchedule || !this._state || !this.content) return;
+      if (!this._state || !this.content) return;
       try {
         this._render();
       } catch (err) {
         console.error("Naolib card: render failed", err);
       }
-    }, 2e4);
+    }, TICK_MS);
   }
   disconnectedCallback() {
     if (this._ticker) {
@@ -537,7 +843,43 @@ var NaolibCard = class extends HTMLElement {
     }
   }
   _message(html) {
-    this.content.innerHTML = `<div class="no-bus">${html}</div>`;
+    this.content.innerHTML = message(html);
+  }
+  // Replacing innerHTML wholesale loses the scroll position of the timetable
+  // containers, which the 20 s ticker would then reset on every pass.
+  _setContent(html) {
+    const saved = /* @__PURE__ */ new Map();
+    for (const node of this.content.querySelectorAll(`[${ATTR_KEEP_SCROLL}]`)) {
+      saved.set(node.getAttribute(ATTR_KEEP_SCROLL), {
+        top: node.scrollTop,
+        left: node.scrollLeft
+      });
+    }
+    this.content.innerHTML = html;
+    for (const node of this.content.querySelectorAll(`[${ATTR_KEEP_SCROLL}]`)) {
+      const position = saved.get(node.getAttribute(ATTR_KEEP_SCROLL));
+      if (position) {
+        node.scrollTop = position.top;
+        node.scrollLeft = position.left;
+      }
+    }
+    if (this._scrollToCurrentHour) {
+      this._scrollToCurrentHour = !this._scrollHoursToCurrent();
+    }
+  }
+  _scrollHoursToCurrent() {
+    const body = this.content.querySelector(".tt-hours");
+    if (!body) return false;
+    const cell = body.querySelector(".tt-cell.now");
+    body.scrollTop = cell ? Math.max(0, cell.offsetTop - 4) : 0;
+    return true;
+  }
+  _resetScheduleState() {
+    this._schedulesByDay = /* @__PURE__ */ new Map();
+    this._fetchedDays = /* @__PURE__ */ new Set();
+    this._selectedLine = null;
+    this._directionByLine = /* @__PURE__ */ new Map();
+    this._dayOffset = 0;
   }
   _updateFromHass(hass) {
     if (!hass) return;
@@ -555,6 +897,9 @@ var NaolibCard = class extends HTMLElement {
       this._message(`Entité introuvable : ${esc(entityId)}`);
       return;
     }
+    if (this._state && (this._state.entity_id !== entityId || this._state.attributes.stop_code !== state.attributes.stop_code)) {
+      this._resetScheduleState();
+    }
     if (this._state && this._state.last_updated === state.last_updated && this._state.entity_id === entityId) {
       return;
     }
@@ -568,22 +913,31 @@ var NaolibCard = class extends HTMLElement {
     }
     this._render();
   }
-  _fetchSchedules() {
-    if (this._fetching || !this._hass || !this._state) return;
+  _fetchSchedules(dayOffset) {
+    if (!this._hass || !this._state) return;
+    if (this._fetchedDays.has(dayOffset) || this._fetchingDays.has(dayOffset)) {
+      return;
+    }
     const stopCode = this._state.attributes.stop_code;
     if (!stopCode) return;
-    this._fetching = true;
-    this._hass.callWS({ type: "naolib/get_data", stop_code: stopCode }).then((data) => {
-      this._schedules = data?.schedules || {};
-      this._schedulesFetched = true;
+    this._fetchingDays.add(dayOffset);
+    this._hass.callWS({
+      type: "naolib/get_data",
+      stop_code: stopCode,
+      day_offset: dayOffset
+    }).then((data) => {
+      this._schedulesByDay.set(dayOffset, data?.schedules || {});
+      this._fetchedDays.add(dayOffset);
       if (this._showSchedule) this._render();
     }).catch((err) => {
       console.error("Error fetching Naolib schedules:", err);
       if (this._showSchedule) {
-        this.content.innerHTML = `${renderTimetableHeader()}<div class="no-bus">Erreur de chargement des horaires : ${esc(err?.message || err)}</div>`;
+        this.content.innerHTML = `${renderTimetableHeader()}${message(
+          `Erreur de chargement des horaires : ${esc(err?.message || err)}`
+        )}`;
       }
     }).finally(() => {
-      this._fetching = false;
+      this._fetchingDays.delete(dayOffset);
     });
   }
   _initShadowDom() {
@@ -601,15 +955,57 @@ var NaolibCard = class extends HTMLElement {
     this.content = this.shadowRoot.getElementById("content");
     this.titleElement = this.shadowRoot.getElementById("title");
     this.content.addEventListener("click", (ev) => {
-      if (ev.target.closest("#schedule-btn")) {
-        this._showSchedule = true;
-        this._render();
-        this._fetchSchedules();
-      } else if (ev.target.closest("#back-btn")) {
-        this._showSchedule = false;
-        this._render();
+      try {
+        this._handleClick(ev);
+      } catch (err) {
+        console.error("Naolib card: interaction failed", err);
       }
     });
+  }
+  _handleClick(ev) {
+    const target = ev.target;
+    if (target.closest(`#${ID_SCHEDULE_BTN}`)) {
+      this._showSchedule = true;
+      this._dayOffset = 0;
+      this._scrollToCurrentHour = true;
+      this._render();
+      this._fetchSchedules(0);
+      return;
+    }
+    if (target.closest(`#${ID_BACK_BTN}`)) {
+      this._showSchedule = false;
+      this._render();
+      return;
+    }
+    const chip = target.closest(`[${ATTR_LINE}]`);
+    if (chip) {
+      this._selectedLine = chip.getAttribute(ATTR_LINE);
+      this._scrollToCurrentHour = true;
+      this._render();
+      return;
+    }
+    const day = target.closest(`[${ATTR_DAY}]`);
+    if (day) {
+      const offset = Number(day.getAttribute(ATTR_DAY));
+      if (Number.isNaN(offset) || offset < 0 || offset > MAX_DAY_OFFSET) return;
+      this._dayOffset = offset;
+      this._scrollToCurrentHour = true;
+      this._render();
+      this._fetchSchedules(offset);
+      return;
+    }
+    const direction = target.closest(`[${ATTR_DIRECTION}]`);
+    if (direction) {
+      const line = this._selectedLine ?? this.content.querySelector(".tt-chip.selected")?.getAttribute(ATTR_LINE);
+      if (line === void 0 || line === null) return;
+      this._selectedLine = line;
+      this._directionByLine.set(
+        line,
+        Number(direction.getAttribute(ATTR_DIRECTION))
+      );
+      this._scrollToCurrentHour = true;
+      this._render();
+    }
   }
   _updateTitle(name) {
     if (this.titleElement) this.titleElement.innerText = name || "Arrêt Naolib";
@@ -621,25 +1017,33 @@ var NaolibCard = class extends HTMLElement {
     }
     const config = this.config;
     if (this._showSchedule) {
-      this.content.innerHTML = renderTimetable(
-        this._schedules || {},
-        !!this._schedulesFetched,
-        config
+      this._setContent(
+        renderTimetable({
+          schedules: this._schedulesByDay.get(this._dayOffset) || {},
+          fetched: this._fetchedDays.has(this._dayOffset),
+          config,
+          selectedLine: this._selectedLine,
+          directionByLine: this._directionByLine,
+          dayOffset: this._dayOffset
+        })
       );
       return;
     }
-    this.content.innerHTML = renderDepartures(
-      prepareDepartures(this._state.attributes.next_departures, config),
-      this._state.attributes.stop_code,
-      config
+    this._setContent(
+      renderDepartures(
+        prepareDepartures(this._state.attributes.next_departures, config),
+        this._state.attributes.stop_code,
+        config
+      )
     );
   }
   getCardSize() {
-    const departures = prepareDepartures(
+    if (this._showSchedule) return 10;
+    const departures2 = prepareDepartures(
       this._state?.attributes?.next_departures ?? [],
       this.config
     );
-    return 2 + Math.ceil(departures.length / (this.config.compact ? 1 : 2));
+    return 2 + Math.ceil(departures2.length / (this.config.compact ? 1 : 2));
   }
   // Sizing for the sections view: the rendered height depends on how many
   // line/destination groups the feed returns and doubles when the timetable

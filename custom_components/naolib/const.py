@@ -10,6 +10,7 @@ CONF_STOP_CODE: str = "stop_code"
 CONF_STOP_LABEL: str = "stop_label"
 CONF_QUAYS: str = "quays"
 CONF_LOCATION: str = "location"
+CONF_QUERY: str = "query"
 CONF_UPDATE_INTERVAL: str = "update_interval"
 
 # Action exposing the departures to scripts and automations.
@@ -47,5 +48,11 @@ LOADER_FILENAME: str = "naolib-loader.js"
 SCHEDULES_DB: str = "data/schedules.sqlite"
 CALENDAR_FILE: str = "data/calendar.json"
 
+# How far ahead the card may ask for a timetable, in days.
+MAX_TIMETABLE_DAY_OFFSET: int = 6
+
 # Number of nearby stops proposed in the config flow.
 NEARBY_STOPS_LIMIT: int = 15
+
+# Number of stops proposed when searching by name.
+SEARCH_STOPS_LIMIT: int = 25

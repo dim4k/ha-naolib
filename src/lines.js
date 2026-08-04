@@ -22,11 +22,11 @@ const LINE_COLORS = {
 // yellow/lime/pink lines, e.g. C20).
 const DARK_TEXT_LINES = ["4", "C4", "C7", "C8", "C9", "C20"];
 
-const MODE_ICONS = {
-    1: "mdi:tram",
-    2: "mdi:bus-articulated-front",
-    3: "mdi:bus",
-    4: "mdi:ferry",
+const MODE_LABELS = {
+    1: "Tramway",
+    2: "Busway",
+    3: "Bus",
+    4: "Navibus",
 };
 
 export function lineBadge(line) {
@@ -35,6 +35,6 @@ export function lineBadge(line) {
     return `<div class="badge" style="background-color: ${background}; color: ${color};" title="Ligne ${esc(line)}">${esc(line)}</div>`;
 }
 
-export function modeIcon(type) {
-    return MODE_ICONS[type] || "mdi:bus";
+export function modeLabel(type) {
+    return MODE_LABELS[type] || "Bus";
 }

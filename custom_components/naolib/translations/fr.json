@@ -3,12 +3,30 @@
         "step": {
             "user": {
                 "title": "Configuration Naolib Nantes",
+                "description": "Comment souhaitez-vous chercher l'arrêt ?",
+                "menu_options": {
+                    "by_location": "Chercher autour d'une position",
+                    "by_name": "Chercher par nom"
+                }
+            },
+            "by_location": {
+                "title": "Chercher autour d'une position",
                 "description": "Choisissez une position sur la carte pour rechercher les arrêts à proximité.",
                 "data": {
                     "location": "Position"
                 },
                 "data_description": {
                     "location": "Déplacez le marqueur sur la zone où chercher les arrêts. Par défaut, la position de votre domicile."
+                }
+            },
+            "by_name": {
+                "title": "Chercher par nom",
+                "description": "Saisissez une partie du nom de l'arrêt.",
+                "data": {
+                    "query": "Nom de l'arrêt"
+                },
+                "data_description": {
+                    "query": "Par exemple « comme » trouve « Commerce ». La casse et les accents sont ignorés."
                 }
             },
             "select_stop": {
@@ -18,12 +36,12 @@
                     "stop_code": "Arrêt"
                 },
                 "data_description": {
-                    "stop_code": "Liste des arrêts les plus proches, avec leur distance."
+                    "stop_code": "Arrêts correspondants, avec leur distance lors d'une recherche sur la carte."
                 }
             }
         },
         "error": {
-            "no_stops_found": "Aucun arrêt trouvé à proximité.",
+            "no_stops_found": "Aucun arrêt correspondant.",
             "unknown": "Erreur inattendue."
         },
         "abort": {

@@ -1,5 +1,6 @@
 """The Naolib integration for Home Assistant."""
 
+from datetime import timedelta
 import logging
 from typing import Any
 
@@ -34,6 +35,7 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     LOADER_FILENAME,
+    MAX_TIMETABLE_DAY_OFFSET,
     PLATFORMS,
     SERVICE_GET_DEPARTURES,
 )
@@ -212,6 +214,9 @@ async def _async_update_listener(hass: HomeAssistant, entry: NaolibConfigEntry) 
     {
         vol.Required("type"): "naolib/get_data",
         vol.Required("stop_code"): str,
+        vol.Optional("day_offset", default=0): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=MAX_TIMETABLE_DAY_OFFSET)
+        ),
     }
 )
 @websocket_api.async_response
@@ -230,10 +235,11 @@ async def handle_get_data(
         return
 
     payload = build_stop_data(coordinator.data or {}, stop)
-    today = dt_util.now().date()
+    day = dt_util.now().date() + timedelta(days=msg["day_offset"])
     payload["schedules"] = await hass.async_add_executor_job(
-        build_timetable, stop_code, today
+        build_timetable, stop_code, day
     )
+    payload["schedules_date"] = day.isoformat()
     connection.send_result(msg["id"], payload)
 
 

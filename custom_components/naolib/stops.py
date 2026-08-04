@@ -8,8 +8,9 @@ import logging
 import math
 from pathlib import Path
 from typing import Any
+import unicodedata
 
-from .const import NEARBY_STOPS_LIMIT, STOPS_INDEX_FILE
+from .const import NEARBY_STOPS_LIMIT, SEARCH_STOPS_LIMIT, STOPS_INDEX_FILE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,3 +55,24 @@ def nearby_stops(
     ]
     scored.sort(key=lambda stop: stop["distance"])
     return scored[:limit]
+
+
+def _normalize(value: str) -> str:
+    """Fold case and strip accents, so "Gare de l'Etat" matches "l'État"."""
+    decomposed = unicodedata.normalize("NFD", value.casefold())
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
+
+
+def search_stops(query: str, limit: int = SEARCH_STOPS_LIMIT) -> list[dict[str, Any]]:
+    """Return the stops whose name contains ``query``, best matches first."""
+    needle = _normalize(query).strip()
+    if not needle:
+        return []
+    matches = [
+        (_normalize(stop["name"]), stop)
+        for stop in load_stops()
+        if needle in _normalize(stop["name"])
+    ]
+    # Names starting with the query come first, then alphabetically.
+    matches.sort(key=lambda item: (not item[0].startswith(needle), item[0]))
+    return [stop for _name, stop in matches[:limit]]

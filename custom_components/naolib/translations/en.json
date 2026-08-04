@@ -3,12 +3,30 @@
         "step": {
             "user": {
                 "title": "Naolib Nantes Configuration",
+                "description": "How do you want to look for the stop?",
+                "menu_options": {
+                    "by_location": "Search around a location",
+                    "by_name": "Search by name"
+                }
+            },
+            "by_location": {
+                "title": "Search around a location",
                 "description": "Pick a location on the map to search for nearby stops.",
                 "data": {
                     "location": "Location"
                 },
                 "data_description": {
                     "location": "Move the marker to the area where you want to look for stops. Defaults to your home location."
+                }
+            },
+            "by_name": {
+                "title": "Search by name",
+                "description": "Type part of the stop name.",
+                "data": {
+                    "query": "Stop name"
+                },
+                "data_description": {
+                    "query": "For example \"comme\" finds \"Commerce\". Case and accents are ignored."
                 }
             },
             "select_stop": {
@@ -18,12 +36,12 @@
                     "stop_code": "Stop"
                 },
                 "data_description": {
-                    "stop_code": "List of the closest stops, with their distance."
+                    "stop_code": "Matching stops, with their distance when searched from the map."
                 }
             }
         },
         "error": {
-            "no_stops_found": "No stops found nearby.",
+            "no_stops_found": "No matching stop found.",
             "unknown": "Unexpected error."
         },
         "abort": {

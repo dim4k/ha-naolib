@@ -222,6 +222,42 @@ async def test_websocket_returns_the_departures_and_the_timetable(
     assert len(response["result"]["next_departures"]) == 1
 
 
+async def test_websocket_serves_the_timetable_of_a_following_day(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    """The card browses the next days by passing a day offset."""
+    await _setup(hass, _entry())
+    client = await hass_ws_client(hass)
+
+    with patch(
+        "custom_components.naolib.build_timetable", return_value={}
+    ) as build_timetable:
+        await client.send_json_auto_id(
+            {"type": "naolib/get_data", "stop_code": "STOP1", "day_offset": 2}
+        )
+        response = await client.receive_json()
+
+    expected = dt_util.now().date() + timedelta(days=2)
+    assert response["success"]
+    assert response["result"]["schedules_date"] == expected.isoformat()
+    assert build_timetable.call_args.args[1] == expected
+
+
+async def test_websocket_rejects_a_day_offset_out_of_range(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    """Only the days the embedded calendar covers can be requested."""
+    await _setup(hass, _entry())
+    client = await hass_ws_client(hass)
+
+    await client.send_json_auto_id(
+        {"type": "naolib/get_data", "stop_code": "STOP1", "day_offset": 30}
+    )
+    response = await client.receive_json()
+
+    assert not response["success"]
+
+
 async def test_websocket_rejects_an_unknown_stop(
     hass: HomeAssistant, hass_ws_client
 ) -> None:

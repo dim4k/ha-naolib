@@ -14,12 +14,14 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
+    TextSelector,
 )
 import voluptuous as vol
 
 from .const import (
     CONF_LOCATION,
     CONF_QUAYS,
+    CONF_QUERY,
     CONF_STOP_CODE,
     CONF_STOP_LABEL,
     CONF_UPDATE_INTERVAL,
@@ -28,7 +30,7 @@ from .const import (
     MAX_UPDATE_INTERVAL,
     MIN_UPDATE_INTERVAL,
 )
-from .stops import nearby_stops
+from .stops import nearby_stops, search_stops
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,41 +47,68 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle the initial step: pick a location on the map."""
+        """Handle the initial step: choose how to look for a stop."""
+        return self.async_show_menu(
+            step_id="user",
+            menu_options=["by_location", "by_name"],
+        )
+
+    async def _async_lookup(
+        self, step_id: str, schema: vol.Schema, search, *args
+    ) -> ConfigFlowResult:
+        """Run a stop lookup and move on to the selection when it yields stops."""
         errors: dict[str, str] = {}
+        try:
+            self._stops = await self.hass.async_add_executor_job(search, *args)
+        except Exception:
+            _LOGGER.exception("Failed to search for Naolib stops")
+            errors["base"] = "unknown"
+        else:
+            if self._stops:
+                return await self.async_step_select_stop()
+            errors["base"] = "no_stops_found"
 
-        if user_input is not None:
-            location = user_input[CONF_LOCATION]
-            lat = location["latitude"]
-            lon = location["longitude"]
+        return self.async_show_form(step_id=step_id, data_schema=schema, errors=errors)
 
-            try:
-                self._stops = await self.hass.async_add_executor_job(
-                    nearby_stops, lat, lon
-                )
-            except Exception:
-                _LOGGER.exception("Failed to search for nearby Naolib stops")
-                errors["base"] = "unknown"
-            else:
-                if not self._stops:
-                    errors["base"] = "no_stops_found"
-                else:
-                    return await self.async_step_select_stop()
-
+    async def async_step_by_location(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Search the stops around a location picked on the map."""
         default_location = {
             "latitude": self.hass.config.latitude,
             "longitude": self.hass.config.longitude,
         }
-        return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_LOCATION, default=default_location
-                    ): LocationSelector(),
-                }
-            ),
-            errors=errors,
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_LOCATION, default=default_location
+                ): LocationSelector(),
+            }
+        )
+
+        if user_input is None:
+            return self.async_show_form(step_id="by_location", data_schema=schema)
+
+        location = user_input[CONF_LOCATION]
+        return await self._async_lookup(
+            "by_location",
+            schema,
+            nearby_stops,
+            location["latitude"],
+            location["longitude"],
+        )
+
+    async def async_step_by_name(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Search the stops whose name matches what the user typed."""
+        schema = vol.Schema({vol.Required(CONF_QUERY): TextSelector()})
+
+        if user_input is None:
+            return self.async_show_form(step_id="by_name", data_schema=schema)
+
+        return await self._async_lookup(
+            "by_name", schema, search_stops, user_input[CONF_QUERY]
         )
 
     async def async_step_reconfigure(
@@ -132,7 +161,11 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         options = [
             {
                 "value": stop["id"],
-                "label": f"{stop['name']} ({stop['distance']} m)",
+                "label": (
+                    f"{stop['name']} ({stop['distance']} m)"
+                    if "distance" in stop
+                    else stop["name"]
+                ),
             }
             for stop in self._stops
         ]
