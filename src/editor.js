@@ -1,4 +1,5 @@
 import { DEFAULT_CONFIG, MAX_LINES_LIMIT, MAX_WALK_TIME } from "./config.js";
+import { isDepartureEntity, matchingEntities } from "./entities.js";
 
 const LABELS = {
     entity: "Entité (arrêt Naolib)",
@@ -41,7 +42,16 @@ function buildSchema(hass, config) {
             name: "entity",
             required: true,
             selector: {
-                entity: { filter: [{ domain: "sensor", integration: "naolib" }] },
+                entity: {
+                    filter: [{ domain: "sensor", integration: "naolib" }],
+                    // The integration also creates bike sensors, which this
+                    // card cannot render.
+                    include_entities: matchingEntities(
+                        hass,
+                        isDepartureEntity,
+                        config.entity,
+                    ),
+                },
             },
         },
         { name: "title", selector: { text: {} } },

@@ -3,10 +3,26 @@
         "step": {
             "user": {
                 "title": "Configuration Naolib Nantes",
-                "description": "Comment souhaitez-vous chercher l'arrêt ?",
+                "description": "Que souhaitez-vous suivre ?",
                 "menu_options": {
-                    "by_location": "Chercher autour d'une position",
-                    "by_name": "Chercher par nom"
+                    "stop": "Un arrêt (bus, tram, navibus)",
+                    "bike": "Une station vélo"
+                }
+            },
+            "stop": {
+                "title": "Choix de l'arrêt",
+                "description": "Comment souhaitez-vous choisir l'arrêt ?",
+                "menu_options": {
+                    "by_list": "Choisir dans la liste",
+                    "by_location": "Chercher autour d'une position"
+                }
+            },
+            "bike": {
+                "title": "Choix de la station vélo",
+                "description": "Comment souhaitez-vous choisir la station ?",
+                "menu_options": {
+                    "bike_by_list": "Choisir dans la liste",
+                    "bike_by_location": "Chercher autour d'une position"
                 }
             },
             "by_location": {
@@ -19,16 +35,6 @@
                     "location": "Déplacez le marqueur sur la zone où chercher les arrêts. Par défaut, la position de votre domicile."
                 }
             },
-            "by_name": {
-                "title": "Chercher par nom",
-                "description": "Saisissez une partie du nom de l'arrêt.",
-                "data": {
-                    "query": "Nom de l'arrêt"
-                },
-                "data_description": {
-                    "query": "Par exemple « comme » trouve « Commerce ». La casse et les accents sont ignorés."
-                }
-            },
             "select_stop": {
                 "title": "Choix de l'arrêt",
                 "description": "Sélectionnez l'arrêt à suivre.",
@@ -36,17 +42,42 @@
                     "stop_code": "Arrêt"
                 },
                 "data_description": {
-                    "stop_code": "Arrêts correspondants, avec leur distance lors d'une recherche sur la carte."
+                    "stop_code": "Saisissez quelques lettres pour filtrer la liste. La distance est affichée lors d'une recherche sur la carte."
+                }
+            },
+            "bike_by_location": {
+                "title": "Chercher autour d'une position",
+                "description": "Choisissez une position sur la carte pour rechercher les stations vélo à proximité.",
+                "data": {
+                    "location": "Position"
+                },
+                "data_description": {
+                    "location": "Déplacez le marqueur sur la zone où chercher les stations. Par défaut, la position de votre domicile."
+                }
+            },
+            "select_station": {
+                "title": "Choix de la station vélo",
+                "description": "Sélectionnez la station à suivre.",
+                "data": {
+                    "station_id": "Station"
+                },
+                "data_description": {
+                    "station_id": "Saisissez quelques lettres pour filtrer la liste. La distance est affichée lors d'une recherche sur la carte."
                 }
             }
         },
         "error": {
             "no_stops_found": "Aucun arrêt correspondant.",
+            "no_stations_found": "Aucune station vélo correspondante.",
+            "cannot_connect": "Impossible de joindre le service vélo Naolib.",
             "unknown": "Erreur inattendue."
         },
         "abort": {
-            "already_configured": "Cet arrêt est déjà configuré.",
-            "reconfigure_successful": "Arrêt mis à jour avec succès."
+            "already_configured": "Cet arrêt ou cette station est déjà configuré.",
+            "cannot_connect": "Impossible de joindre le service vélo Naolib.",
+            "no_stops_found": "Aucun arrêt disponible.",
+            "no_stations_found": "Aucune station vélo disponible.",
+            "reconfigure_successful": "Configuration mise à jour avec succès."
         }
     },
     "options": {
@@ -67,6 +98,12 @@
         "sensor": {
             "next_departures": {
                 "name": "Prochains départs"
+            },
+            "bikes_available": {
+                "name": "Vélos disponibles"
+            },
+            "docks_available": {
+                "name": "Places disponibles"
             }
         }
     },
@@ -104,6 +141,9 @@
         },
         "entry_not_loaded": {
             "message": "L'arrêt {target} n'est pas chargé."
+        },
+        "entry_wrong_type": {
+            "message": "{target} est une station vélo : cette action ne s'applique qu'aux arrêts."
         }
     }
 }

@@ -147,145 +147,25 @@ function prepareDepartures(departures2, config, now = Date.now()) {
   return out;
 }
 
-// src/editor.js
-var LABELS = {
-  entity: "Entité (arrêt Naolib)",
-  title: "Titre",
-  lines: "Lignes",
-  direction: "Direction",
-  walk_time: "Temps de marche (minutes)",
-  max_lines: "Lignes affichées par direction",
-  show_timetable_button: "Bouton « Voir tous les horaires »",
-  compact: "Mode compact"
-};
-var HELPERS = {
-  title: "Laisser vide pour utiliser le nom de l'arrêt.",
-  lines: "Ne garder que ces lignes. Toutes les lignes si vide.",
-  walk_time: "Masque les départs qui ne peuvent plus être atteints à pied.",
-  max_lines: "Nombre maximum de lignes affichées dans chaque sens. En mode compact, nombre maximum de départs affichés.",
-  compact: "Une ligne par départ, sans regroupement par direction."
-};
-function lineOptions(hass, config) {
-  const state = hass.states[config.entity];
-  const departures2 = state?.attributes?.next_departures || [];
-  const lines = new Set(
-    departures2.map((departure) => String(departure.line ?? "")).filter(Boolean)
+// src/entities.js
+function isDepartureEntity(state) {
+  return !!state && state.attributes.stop_code !== void 0 && Array.isArray(state.attributes.next_departures);
+}
+function isBikeEntity(state) {
+  return !!state && state.attributes.station_id !== void 0 && Array.isArray(state.attributes.nearby_stations);
+}
+function findEntity(hass, predicate) {
+  return Object.keys(hass.states).find(
+    (entityId) => predicate(hass.states[entityId])
   );
-  for (const line of config.lines) lines.add(String(line));
-  return [...lines].sort((a, b) => a.localeCompare(b, void 0, { numeric: true })).map((line) => ({ value: line, label: line }));
 }
-function buildSchema(hass, config) {
-  return [
-    {
-      name: "entity",
-      required: true,
-      selector: {
-        entity: { filter: [{ domain: "sensor", integration: "naolib" }] }
-      }
-    },
-    { name: "title", selector: { text: {} } },
-    {
-      name: "lines",
-      selector: {
-        select: {
-          multiple: true,
-          custom_value: true,
-          options: lineOptions(hass, config)
-        }
-      }
-    },
-    {
-      name: "direction",
-      selector: {
-        select: {
-          mode: "dropdown",
-          options: [
-            { value: "0", label: "Les deux" },
-            { value: "1", label: "Direction 1" },
-            { value: "2", label: "Direction 2" }
-          ]
-        }
-      }
-    },
-    {
-      name: "",
-      type: "grid",
-      schema: [
-        {
-          name: "max_lines",
-          selector: {
-            number: { min: 1, max: MAX_LINES_LIMIT, mode: "box" }
-          }
-        },
-        {
-          name: "walk_time",
-          selector: {
-            number: {
-              min: 0,
-              max: MAX_WALK_TIME,
-              mode: "box",
-              unit_of_measurement: "min"
-            }
-          }
-        },
-        { name: "show_timetable_button", selector: { boolean: {} } },
-        { name: "compact", selector: { boolean: {} } }
-      ]
-    }
-  ];
+function matchingEntities(hass, predicate, current) {
+  const ids = Object.keys(hass.states).filter(
+    (entityId) => predicate(hass.states[entityId])
+  );
+  if (current && !ids.includes(current)) ids.push(current);
+  return ids;
 }
-function prune(config) {
-  const out = {};
-  for (const [key, value] of Object.entries(config)) {
-    if (key in DEFAULT_CONFIG) {
-      if (JSON.stringify(value) === JSON.stringify(DEFAULT_CONFIG[key])) continue;
-    }
-    out[key] = value;
-  }
-  return out;
-}
-var NaolibCardEditor = class extends HTMLElement {
-  setConfig(config) {
-    this._config = { ...DEFAULT_CONFIG, ...config || {} };
-    this._render();
-  }
-  set hass(hass) {
-    this._hass = hass;
-    this._render();
-  }
-  _render() {
-    if (!this._hass || !this._config) return;
-    if (!this._form) {
-      this._form = document.createElement("ha-form");
-      this._form.computeLabel = (schema) => LABELS[schema.name] || schema.name;
-      this._form.computeHelper = (schema) => HELPERS[schema.name] || "";
-      this._form.addEventListener(
-        "value-changed",
-        (ev) => this._valueChanged(ev)
-      );
-      this.appendChild(this._form);
-    }
-    this._form.hass = this._hass;
-    this._form.schema = buildSchema(this._hass, this._config);
-    this._form.data = { ...this._config, direction: String(this._config.direction) };
-  }
-  _valueChanged(ev) {
-    ev.stopPropagation();
-    const value = ev.detail.value;
-    this._config = {
-      ...this._config,
-      ...value,
-      direction: Number(value.direction ?? 0)
-    };
-    this.dispatchEvent(
-      new CustomEvent("config-changed", {
-        detail: { config: prune(this._config) },
-        bubbles: true,
-        composed: true
-      })
-    );
-  }
-};
 
 // src/html.js
 function esc(value) {
@@ -303,33 +183,85 @@ function esc(value) {
 
 // src/lines.js
 var LINE_COLORS = {
-  1: "#00A754",
-  2: "#E30612",
-  3: "#2481C3",
-  4: "#FDC600",
-  5: "#0BBBEF",
-  C1: "#0BBBEF",
-  C2: "#EE7402",
-  C3: "#F7A600",
-  C4: "#76B82A",
-  C6: "#A877B2",
-  C7: "#C8D300",
-  C8: "#C8D300",
-  C9: "#F5B5D3",
-  C20: "#FFED00",
-  NA: "#2ecc71"
+  "1": { bg: "#00a754", text: "#ffffff" },
+  "1B": { bg: "#00a754", text: "#ffffff" },
+  "2": { bg: "#e30613", text: "#ffffff" },
+  "3": { bg: "#2581c4", text: "#ffffff" },
+  "4": { bg: "#ffcd1c", text: "#000000" },
+  "5": { bg: "#0bbbef", text: "#ffffff" },
+  "10": { bg: "#ffed00", text: "#000000" },
+  "11": { bg: "#e8b975", text: "#000000" },
+  "12": { bg: "#a1daf8", text: "#000000" },
+  "23": { bg: "#0bbbef", text: "#ffffff" },
+  "26": { bg: "#009640", text: "#ffffff" },
+  "27": { bg: "#a1daf8", text: "#000000" },
+  "28": { bg: "#a1daf8", text: "#000000" },
+  "30": { bg: "#ffed00", text: "#000000" },
+  "33": { bg: "#f5b5d3", text: "#000000" },
+  "36": { bg: "#65c2c4", text: "#ffffff" },
+  "38": { bg: "#009640", text: "#ffffff" },
+  "40": { bg: "#ffed00", text: "#000000" },
+  "42": { bg: "#c8d300", text: "#000000" },
+  "47": { bg: "#bca3ce", text: "#ffffff" },
+  "50": { bg: "#ffed00", text: "#000000" },
+  "59": { bg: "#f5b5d3", text: "#000000" },
+  "60": { bg: "#ffed00", text: "#000000" },
+  "66": { bg: "#2581c4", text: "#ffffff" },
+  "67": { bg: "#2581c4", text: "#ffffff" },
+  "69": { bg: "#d39e46", text: "#ffffff" },
+  "71": { bg: "#c8d300", text: "#000000" },
+  "75": { bg: "#e8b975", text: "#000000" },
+  "77": { bg: "#a1daf8", text: "#000000" },
+  "78": { bg: "#f7a600", text: "#000000" },
+  "79": { bg: "#f5b5d3", text: "#000000" },
+  "80": { bg: "#ffed00", text: "#000000" },
+  "81": { bg: "#65c2c4", text: "#ffffff" },
+  "85": { bg: "#f5b5d3", text: "#000000" },
+  "86": { bg: "#0bbbef", text: "#ffffff" },
+  "87": { bg: "#f7a600", text: "#000000" },
+  "88": { bg: "#a877b2", text: "#ffffff" },
+  "89": { bg: "#76b82a", text: "#ffffff" },
+  "91": { bg: "#009640", text: "#ffffff" },
+  "93": { bg: "#65c2c4", text: "#ffffff" },
+  "95": { bg: "#c8d300", text: "#000000" },
+  "96": { bg: "#f7a600", text: "#000000" },
+  "97": { bg: "#bca3ce", text: "#ffffff" },
+  "98": { bg: "#f7a600", text: "#000000" },
+  "118": { bg: "#a9162e", text: "#ffffff" },
+  "142": { bg: "#a9162e", text: "#ffffff" },
+  "C1": { bg: "#0bbbef", text: "#ffffff" },
+  "C2": { bg: "#ee7402", text: "#ffffff" },
+  "C3": { bg: "#f7a600", text: "#000000" },
+  "C4": { bg: "#76b82a", text: "#ffffff" },
+  "C6": { bg: "#a877b2", text: "#ffffff" },
+  "C7": { bg: "#c8d300", text: "#000000" },
+  "C8": { bg: "#c8d300", text: "#000000" },
+  "C9": { bg: "#f5b5d3", text: "#000000" },
+  "C20": { bg: "#ffed00", text: "#000000" },
+  "E1": { bg: "#e30613", text: "#ffffff" },
+  "E4": { bg: "#e30613", text: "#ffffff" },
+  "E5": { bg: "#e30613", text: "#ffffff" },
+  "E8": { bg: "#e30613", text: "#ffffff" },
+  "N1": { bg: "#2aaab6", text: "#ffffff" },
+  "N2": { bg: "#2aaab6", text: "#ffffff" },
+  "N3": { bg: "#2aaab6", text: "#ffffff" },
+  "NA": { bg: "#a1daf8", text: "#000000" },
+  "TE1": { bg: "#502391", text: "#ffffff" },
+  "TE2": { bg: "#2581c4", text: "#ffffff" }
 };
-var DARK_TEXT_LINES = ["4", "C4", "C7", "C8", "C9", "C20"];
+var FALLBACK = { bg: "var(--primary-color)", text: "#ffffff" };
 var MODE_LABELS = {
   1: "Tramway",
   2: "Busway",
   3: "Bus",
   4: "Navibus"
 };
+function lineColors(line) {
+  return LINE_COLORS[String(line).toUpperCase()] || FALLBACK;
+}
 function lineBadge(line) {
-  const background = LINE_COLORS[line] || "var(--primary-color)";
-  const color = DARK_TEXT_LINES.includes(String(line)) ? "#1a1a1a" : "#ffffff";
-  return `<div class="badge" style="background-color: ${background}; color: ${color};" title="Ligne ${esc(line)}">${esc(line)}</div>`;
+  const { bg, text } = lineColors(line);
+  return `<div class="badge" style="background-color: ${bg}; color: ${text};" title="Ligne ${esc(line)}">${esc(line)}</div>`;
 }
 function modeLabel(type) {
   return MODE_LABELS[type] || "Bus";
@@ -344,36 +276,27 @@ function timeClass(minutes) {
   if (minutes <= WARNING_MINUTES) return "time warning";
   return "time";
 }
-function clockHtml(expected, delay) {
+function clocksHtml(item) {
+  const expected = Date.parse(item.expected_ts);
+  if (Number.isNaN(expected)) return "";
   const real = formatClock(new Date(expected));
+  const delay = item.delay_minutes;
   if (typeof delay !== "number" || Math.abs(delay) < DELAY_TOLERANCE_MINUTES) {
-    return `<span class="clock">${real}</span>`;
+    return `<span class="clock strong">${real}</span>`;
   }
   const aimed = formatClock(new Date(expected - delay * 6e4));
   const state = delay > 0 ? "late" : "early";
   const title = delay > 0 ? `${delay} min de retard sur l'horaire théorique` : `${-delay} min d'avance sur l'horaire théorique`;
-  return `<span class="clock aimed">${aimed}</span><span class="clock ${state}" title="${title}">${real}</span>`;
+  return `<span class="clock aimed">${aimed}</span><span class="clock strong ${state}" title="${title}">${real}</span>`;
 }
-function departureMeta(item) {
-  const expected = Date.parse(item.expected_ts);
-  if (Number.isNaN(expected)) return "";
-  const last = item.is_last ? `<span class="time-meta last" title="Dernier passage prévu aujourd'hui">dernier</span>` : "";
-  return `${last}${clockHtml(expected, item.delay_minutes)}`;
+function isLate(item) {
+  return typeof item.delay_minutes === "number" && item.delay_minutes >= DELAY_TOLERANCE_MINUTES;
 }
 
 // src/render/departures.js
-function departureHtml(item, cssClass) {
-  const meta = departureMeta(item);
+function tileRow(departure, timesHtml) {
   return `
-        <div class="departure">
-            <div class="${cssClass}">${esc(item.time)}</div>
-            ${meta ? `<div class="departure-meta">${meta}</div>` : ""}
-        </div>
-    `;
-}
-function tileHtml(departure, timesHtml) {
-  return `
-        <div class="tile">
+        <div class="tile-row">
             ${lineBadge(departure.line)}
             <div class="tile-text">
                 <div class="dest">${esc(departure.destination)}</div>
@@ -383,8 +306,43 @@ function tileHtml(departure, timesHtml) {
         </div>
     `;
 }
+function nextClock(item) {
+  const expected = Date.parse(item.expected_ts);
+  if (Number.isNaN(expected)) return "";
+  const clock = formatClock(new Date(expected));
+  return `<span class="clock${isLate(item) ? " late" : ""}">${clock}</span>`;
+}
+function stripHtml(first, second) {
+  const last = Boolean(first.is_last || second?.is_last);
+  const state = isLate(first) ? " late" : last ? " final" : "";
+  const next = second ? ` · puis ${esc(second.time)} (${nextClock(second)})` : "";
+  return `
+        <div class="strip${state}">
+            <span>${clocksHtml(first)}${next}</span>
+            ${last ? `<span class="mark" title="Dernier passage prévu aujourd'hui">dernier</span>` : ""}
+        </div>
+    `;
+}
+function tileHtml(first, second) {
+  const countdown = `<div class="${timeClass(first.minutes)}">${esc(first.time)}</div>`;
+  return `
+        <div class="tile">
+            ${tileRow(first, countdown)}
+            ${stripHtml(first, second)}
+        </div>
+    `;
+}
+function compactTileHtml(departure) {
+  const expected = Date.parse(departure.expected_ts);
+  const title = Number.isNaN(expected) ? "" : ` title="${formatClock(new Date(expected))}"`;
+  const mark = departure.is_last ? `<span class="mark">dernier</span>` : "";
+  const countdown = `<div class="${timeClass(departure.minutes)}"${title}>${esc(departure.time)}</div>`;
+  return `<div class="tile">${tileRow(departure, `${mark}${countdown}`)}</div>`;
+}
 function groupedTiles(departures2, direction, config) {
-  const inDirection = departures2.filter((item) => item.direction === direction);
+  const inDirection = departures2.filter(
+    (item) => item.direction === direction
+  );
   if (inDirection.length === 0) return message("Pas de départ");
   const groups = {};
   for (const departure of inDirection) {
@@ -392,12 +350,7 @@ function groupedTiles(departures2, direction, config) {
     if (!groups[key]) groups[key] = { ...departure, items: [] };
     groups[key].items.push(departure);
   }
-  return Object.values(groups).sort((a, b) => a.items[0].minutes - b.items[0].minutes).slice(0, config.max_lines).map((group) => {
-    const [first, second] = group.items;
-    let timesHtml = departureHtml(first, timeClass(first.minutes));
-    if (second) timesHtml += departureHtml(second, "time-secondary");
-    return tileHtml(group, timesHtml);
-  }).join("");
+  return Object.values(groups).sort((a, b) => a.items[0].minutes - b.items[0].minutes).slice(0, config.max_lines).map((group) => tileHtml(group.items[0], group.items[1])).join("");
 }
 function footerHtml(stopCode, config) {
   if (!stopCode || !config.show_timetable_button) return "";
@@ -415,9 +368,7 @@ function renderDepartures(departures2, stopCode, config) {
     return `${message("Aucun départ proche")}${footerHtml(stopCode, config)}`;
   }
   if (config.compact) {
-    const tiles = departures2.map(
-      (departure) => tileHtml(departure, departureHtml(departure, timeClass(departure.minutes)))
-    ).join("");
+    const tiles = departures2.map(compactTileHtml).join("");
     return `<div class="tiles">${tiles}</div>${footerHtml(stopCode, config)}`;
   }
   const sections = [1, 2].filter(
@@ -655,8 +606,6 @@ var base = `
     .time { font-weight: bold; font-size: 1.1em; padding: 4px 8px; border-radius: 4px; white-space: nowrap; background: var(--naolib-neutral); color: var(--primary-text-color); }
     .urgent { background-color: rgba(231, 76, 60, 0.2); color: var(--naolib-urgent); }
     .warning { background-color: rgba(241, 196, 15, 0.2); color: var(--naolib-warning); }
-    .time-meta { font-size: 0.65em; font-weight: 700; white-space: nowrap; padding: 2px 6px; border-radius: 10px; }
-    .time-meta.last { background: var(--naolib-neutral-strong); color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.5px; }
     .button { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: var(--primary-color); font-weight: 500; padding: 6px 12px; border-radius: 4px; transition: background 0.2s; background: none; border: none; font-family: inherit; font-size: inherit; }
     .button:hover { background-color: rgba(var(--rgb-primary-color), 0.1); }
     .button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
@@ -669,30 +618,63 @@ var base = `
     :host([compact]) .time { font-size: 1em; }
 `;
 
+// src/styles/bike.js
+var bike = `
+    .bike-main { padding: 4px 16px 16px; }
+    .bike-counters { display: flex; gap: 12px; }
+    .bike-counter { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 8px; border-radius: var(--naolib-radius); background: var(--naolib-neutral); }
+    .bike-counter ha-icon { color: var(--primary-color); --mdc-icon-size: 22px; }
+    .bike-count { font-size: 2em; font-weight: bold; line-height: 1.1; color: var(--primary-text-color); }
+    .bike-count.low { color: var(--naolib-warning); }
+    .bike-count.empty { color: var(--naolib-urgent); }
+    .bike-label { font-size: 0.8em; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.5px; }
+    .bike-gauge { margin-top: 12px; height: 6px; border-radius: 3px; background: var(--naolib-neutral-strong); overflow: hidden; }
+    .bike-gauge-fill { height: 100%; background: var(--primary-color); transition: width 0.3s; }
+    .bike-status { margin-top: 10px; padding: 6px 10px; border-radius: 6px; text-align: center; font-size: 0.85em; font-weight: 500; background: rgba(231, 76, 60, 0.15); color: var(--naolib-urgent); }
+    .bike-nearby { border-top: 1px solid var(--divider-color); padding: 8px 16px 12px; }
+    .bike-nearby-title { font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--secondary-text-color); margin-bottom: 4px; }
+    .bike-nearby-row { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; }
+    .bike-nearby-row + .bike-nearby-row { border-top: 1px solid var(--naolib-neutral); }
+    .bike-nearby-row.closed { opacity: 0.5; }
+    .bike-nearby-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bike-nearby-distance { font-size: 0.8em; color: var(--secondary-text-color); white-space: nowrap; }
+    .bike-nearby-bikes, .bike-nearby-docks { font-weight: bold; white-space: nowrap; min-width: 56px; text-align: right; }
+    .bike-nearby-bikes span, .bike-nearby-docks span { font-weight: normal; font-size: 0.75em; color: var(--secondary-text-color); }
+    :host([compact]) .bike-main { padding: 0 12px 12px; }
+    :host([compact]) .bike-counter { padding: 8px 6px; }
+    :host([compact]) .bike-count { font-size: 1.5em; }
+`;
+
 // src/styles/departures.js
 var departures = `
-    .tiles { display: grid; gap: 8px; padding: 12px 16px; }
+    /* minmax(0, 1fr): without it the implicit column is sized on the widest
+       tile, so a long destination next to two clocks pushes the rows past the
+       card, which clips them. */
+    .tiles { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 16px; }
     .tiles + .tiles { padding-top: 0; }
     .tile-group { font-size: 0.68em; font-weight: 500; text-transform: uppercase; letter-spacing: 0.9px; color: var(--secondary-text-color); }
-    .tile { display: flex; align-items: center; gap: 10px; background: var(--naolib-neutral); border-radius: var(--naolib-radius); padding: 10px 12px; }
+    .tile { display: flex; flex-direction: column; gap: 6px; background: var(--naolib-neutral); border-radius: var(--naolib-radius); padding: 10px 12px; }
+    .tile-row { display: flex; align-items: center; gap: 10px; }
     .tile .badge { margin-right: 0; }
     .tile-text { flex: 1; min-width: 0; }
     .tile-mode { font-size: 0.72em; color: var(--secondary-text-color); }
-    .dest { font-size: 1.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    /* Two-row grid so every marker lines up, whatever the height of
-       the time above it. */
-    .times-container { display: grid; grid-auto-flow: column; grid-template-rows: auto auto; column-gap: 10px; justify-items: end; align-items: center; }
-    .departure { display: contents; }
-    .departure > .time, .departure > .time-secondary { grid-row: 1; }
-    .departure-meta { grid-row: 2; display: flex; align-items: center; gap: 4px; margin-top: 3px; }
-    .clock { font-size: 0.72em; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; white-space: nowrap; padding: 2px 6px; border-radius: 10px; background: var(--naolib-neutral-strong); }
-    .clock.aimed { background: none; padding: 2px 0; text-decoration: line-through; opacity: 0.7; }
-    .clock.late, .clock.early { font-weight: 700; }
-    .clock.late { background: rgba(231, 76, 60, 0.18); color: var(--naolib-urgent); }
-    .clock.early { background: rgba(39, 174, 96, 0.18); color: var(--naolib-early); }
-    .time-secondary { font-size: 0.9em; color: var(--secondary-text-color); font-weight: normal; padding: 4px 0; }
+    .dest { font-size: 1.1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .times-container { display: flex; align-items: baseline; gap: 10px; margin-left: auto; }
+    /* Strip under the departure: the clocks the countdown stands for, and the
+       markers. Its tint carries the state so a delay reads without parsing. */
+    .strip { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border-radius: 6px; background: var(--naolib-neutral-strong); font-size: 0.88em; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }
+    .strip.late { background: rgba(231, 76, 60, 0.16); }
+    .strip.final { background: rgba(127, 127, 127, 0.26); }
+    .clock { white-space: nowrap; }
+    .clock.strong { font-weight: 700; color: var(--primary-text-color); }
+    .clock.aimed { margin-right: 4px; text-decoration: line-through; opacity: 0.65; }
+    .clock.late { color: var(--naolib-urgent); font-weight: 700; }
+    .clock.early { color: var(--naolib-early); font-weight: 700; }
+    .mark { font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
     :host([compact]) .tiles { gap: 6px; padding: 8px 16px; }
     :host([compact]) .tile { padding: 6px 10px; }
+    :host([compact]) .strip { font-size: 0.8em; padding: 3px 8px; }
+    :host([compact]) .mark { font-size: 0.8em; color: var(--secondary-text-color); }
 `;
 
 // src/styles/timetable.js
@@ -772,16 +754,11 @@ var timetable = `
 `;
 
 // src/styles/index.js
-var styles = [base, departures, timetable].join("\n");
+var styles = [base, departures, timetable, bike].join("\n");
 
 // src/card.js
-function isNaolibEntity(state) {
-  return !!state && state.attributes.stop_code !== void 0 && Array.isArray(state.attributes.next_departures);
-}
 function findNaolibEntity(hass) {
-  return Object.keys(hass.states).find(
-    (entityId) => isNaolibEntity(hass.states[entityId])
-  );
+  return findEntity(hass, isDepartureEntity);
 }
 var NaolibCard = class extends HTMLElement {
   constructor() {
@@ -1052,6 +1029,542 @@ var NaolibCard = class extends HTMLElement {
     return { columns: 12, min_columns: 6, rows: "auto" };
   }
 };
+
+// src/bike/config.js
+var DEFAULT_BIKE_CONFIG = {
+  entity: "",
+  title: "",
+  nearby_count: 3,
+  // neighbouring stations listed
+  nearby_radius: 500,
+  // meters
+  show_docks: true,
+  compact: false
+};
+var MAX_NEARBY_COUNT = 10;
+var MAX_NEARBY_RADIUS = 1e3;
+function invalid2(message2) {
+  throw new Error(`naolib-bike-card: ${message2}`);
+}
+function asInteger2(value, name, min, max) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max) {
+    invalid2(`"${name}" doit être un entier entre ${min} et ${max}`);
+  }
+  return number;
+}
+function asBoolean2(value, name) {
+  if (typeof value !== "boolean") invalid2(`"${name}" doit être vrai ou faux`);
+  return value;
+}
+function normalizeBikeConfig(config) {
+  if (config && typeof config !== "object") invalid2("configuration invalide");
+  const raw = { ...DEFAULT_BIKE_CONFIG, ...config || {} };
+  if (typeof raw.entity !== "string") invalid2('"entity" doit être une entité');
+  if (typeof raw.title !== "string") invalid2('"title" doit être du texte');
+  return {
+    ...raw,
+    nearby_count: asInteger2(
+      raw.nearby_count ?? DEFAULT_BIKE_CONFIG.nearby_count,
+      "nearby_count",
+      0,
+      MAX_NEARBY_COUNT
+    ),
+    nearby_radius: asInteger2(
+      raw.nearby_radius ?? DEFAULT_BIKE_CONFIG.nearby_radius,
+      "nearby_radius",
+      0,
+      MAX_NEARBY_RADIUS
+    ),
+    show_docks: asBoolean2(raw.show_docks, "show_docks"),
+    compact: asBoolean2(raw.compact, "compact")
+  };
+}
+function prepareNearby(stations, config) {
+  if (!config.nearby_count) return [];
+  return (stations || []).filter((station) => Number(station.distance) <= config.nearby_radius).slice(0, config.nearby_count);
+}
+
+// src/bike/render.js
+function countClass(value, capacity) {
+  if (typeof value !== "number") return "bike-count";
+  if (value === 0) return "bike-count empty";
+  if (capacity && value <= Math.max(1, Math.round(capacity * 0.15))) {
+    return "bike-count low";
+  }
+  return "bike-count";
+}
+function statusHtml(data) {
+  const notices = [];
+  if (data.is_installed === false) notices.push("Station hors service");
+  else {
+    if (data.is_renting === false) notices.push("Location indisponible");
+    if (data.is_returning === false)
+      notices.push("Restitution indisponible");
+  }
+  if (!notices.length) return "";
+  return `<div class="bike-status">${notices.map(esc).join(" · ")}</div>`;
+}
+function gaugeHtml(bikes, capacity) {
+  if (!capacity || typeof bikes !== "number") return "";
+  const ratio = Math.min(100, Math.round(bikes / capacity * 100));
+  return `
+        <div class="bike-gauge" role="img" aria-label="${ratio}% de la capacité">
+            <div class="bike-gauge-fill" style="width: ${ratio}%"></div>
+        </div>
+    `;
+}
+function counterHtml(label, value, capacity, icon) {
+  const text = typeof value === "number" ? String(value) : "—";
+  return `
+        <div class="bike-counter">
+            <ha-icon icon="${icon}"></ha-icon>
+            <div class="${countClass(value, capacity)}">${text}</div>
+            <div class="bike-label">${esc(label)}</div>
+        </div>
+    `;
+}
+function nearbyRowHtml(station, config) {
+  const bikes = typeof station.bikes === "number" ? station.bikes : "—";
+  const docks = typeof station.docks === "number" ? station.docks : "—";
+  const closed = station.is_renting === false ? " closed" : "";
+  const docksCell = config.show_docks ? `<div class="bike-nearby-docks">${docks} <span>pl.</span></div>` : "";
+  return `
+        <div class="bike-nearby-row${closed}">
+            <div class="bike-nearby-name">${esc(station.name)}</div>
+            <div class="bike-nearby-distance">${esc(String(station.distance))} m</div>
+            <div class="bike-nearby-bikes">${bikes} <span>vélos</span></div>
+            ${docksCell}
+        </div>
+    `;
+}
+function nearbyHtml(stations, config) {
+  if (!stations.length) return "";
+  return `
+        <div class="bike-nearby">
+            <div class="bike-nearby-title">Stations à proximité</div>
+            ${stations.map((station) => nearbyRowHtml(station, config)).join("")}
+        </div>
+    `;
+}
+function renderBikeStation(data, nearby, config) {
+  if (!data.available) {
+    return message("Station introuvable dans les données Naolib");
+  }
+  const counters = [
+    counterHtml("vélos", data.bikes, data.capacity, "mdi:bike")
+  ];
+  if (config.show_docks) {
+    counters.push(
+      counterHtml(
+        "places",
+        data.docks,
+        data.capacity,
+        "mdi:rhombus-outline"
+      )
+    );
+  }
+  return `
+        <div class="bike-main">
+            <div class="bike-counters">${counters.join("")}</div>
+            ${config.compact ? "" : gaugeHtml(data.bikes, data.capacity)}
+            ${statusHtml(data)}
+        </div>
+        ${nearbyHtml(nearby, config)}
+    `;
+}
+
+// src/bike/card.js
+function findBikeEntity(hass) {
+  return findEntity(hass, isBikeEntity);
+}
+var NaolibBikeCard = class extends HTMLElement {
+  constructor() {
+    super(...arguments);
+    // `hass` can be set before `setConfig` (mobile reconnections), so the card
+    // always carries a usable configuration.
+    __publicField(this, "config", normalizeBikeConfig({}));
+  }
+  static getStubConfig(hass) {
+    return { entity: findBikeEntity(hass) || "" };
+  }
+  static getConfigElement() {
+    return document.createElement("naolib-bike-card-editor");
+  }
+  setConfig(config) {
+    this.config = normalizeBikeConfig(config);
+    this.toggleAttribute("compact", this.config.compact);
+    this._state = null;
+    if (this.content && this._hass) this._updateFromHass(this._hass);
+  }
+  set hass(hass) {
+    this._hass = hass;
+    try {
+      this._updateFromHass(hass);
+    } catch (err) {
+      console.error("Naolib bike card error:", err);
+      try {
+        if (!this.content) this._initShadowDom();
+        this._message(`Erreur : ${esc(err?.message || err)}`);
+      } catch (renderErr) {
+        console.error(
+          "Naolib bike card: cannot render error state",
+          renderErr
+        );
+      }
+    }
+  }
+  _message(html) {
+    this.content.innerHTML = message(html);
+  }
+  _updateFromHass(hass) {
+    if (!hass) return;
+    const config = this.config;
+    const entityId = config.entity || findBikeEntity(hass);
+    if (!this.content) this._initShadowDom();
+    if (!entityId) {
+      this._message(
+        `Aucune station vélo Naolib trouvée. Ajoutez-la via Paramètres &gt; Appareils et services.`
+      );
+      return;
+    }
+    const state = hass.states[entityId];
+    if (!state || !state.attributes) {
+      this._message(`Entité introuvable : ${esc(entityId)}`);
+      return;
+    }
+    if (this._state && this._state.last_updated === state.last_updated && this._state.entity_id === entityId) {
+      return;
+    }
+    this._state = state;
+    this._updateTitle(
+      config.title || state.attributes.station_label || state.attributes.friendly_name
+    );
+    if (!state.attributes.station_id) {
+      this._message("Entité non configurée (station_id manquant)");
+      return;
+    }
+    this._render();
+  }
+  _initShadowDom() {
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    this.shadowRoot.innerHTML = `
+            <style>${styles}</style>
+            <ha-card>
+                <div class="card-header">
+                    <ha-icon icon="mdi:bike" class="icon"></ha-icon>
+                    <span id="title">Station vélo Naolib</span>
+                </div>
+                <div id="content"></div>
+            </ha-card>
+        `;
+    this.content = this.shadowRoot.getElementById("content");
+    this.titleElement = this.shadowRoot.getElementById("title");
+  }
+  _updateTitle(name) {
+    if (this.titleElement) {
+      this.titleElement.innerText = name || "Station vélo Naolib";
+    }
+  }
+  // The sensor attributes carry everything the card shows, so the whole
+  // station and its neighbours render without any WebSocket round-trip.
+  _stationData() {
+    const attributes = this._state.attributes;
+    return {
+      available: this._state.state !== "unavailable",
+      bikes: Number.isFinite(Number(this._state.state)) ? Number(this._state.state) : null,
+      docks: attributes.docks_available,
+      capacity: attributes.capacity,
+      is_installed: attributes.is_installed,
+      is_renting: attributes.is_renting,
+      is_returning: attributes.is_returning
+    };
+  }
+  _render() {
+    if (!this._state) {
+      this._message("Chargement...");
+      return;
+    }
+    this.content.innerHTML = renderBikeStation(
+      this._stationData(),
+      prepareNearby(this._state.attributes.nearby_stations, this.config),
+      this.config
+    );
+  }
+  getCardSize() {
+    const nearby = prepareNearby(
+      this._state?.attributes?.nearby_stations ?? [],
+      this.config
+    );
+    return 3 + nearby.length;
+  }
+  // Sizing for the sections view: the height depends on how many
+  // neighbouring stations the config asks for, so only the card can measure it.
+  getGridOptions() {
+    return { columns: 12, min_columns: 6, rows: "auto" };
+  }
+};
+
+// src/bike/editor.js
+var LABELS = {
+  entity: "Entité (station vélo Naolib)",
+  title: "Titre",
+  nearby_count: "Stations à proximité affichées",
+  nearby_radius: "Rayon de recherche (mètres)",
+  show_docks: "Afficher les places disponibles",
+  compact: "Mode compact"
+};
+var HELPERS = {
+  title: "Laisser vide pour utiliser le nom de la station.",
+  nearby_count: "Mettre à 0 pour masquer les stations voisines.",
+  nearby_radius: "Les stations plus éloignées ne sont pas proposées.",
+  compact: "Masque la jauge de remplissage."
+};
+function buildSchema(hass, config) {
+  return [
+    {
+      name: "entity",
+      required: true,
+      selector: {
+        entity: {
+          filter: [{ domain: "sensor", integration: "naolib" }],
+          include_entities: matchingEntities(
+            hass,
+            isBikeEntity,
+            config.entity
+          )
+        }
+      }
+    },
+    { name: "title", selector: { text: {} } },
+    {
+      name: "",
+      type: "grid",
+      schema: [
+        {
+          name: "nearby_count",
+          selector: {
+            number: { min: 0, max: MAX_NEARBY_COUNT, mode: "box" }
+          }
+        },
+        {
+          name: "nearby_radius",
+          selector: {
+            number: {
+              min: 0,
+              max: MAX_NEARBY_RADIUS,
+              step: 50,
+              mode: "box",
+              unit_of_measurement: "m"
+            }
+          }
+        },
+        { name: "show_docks", selector: { boolean: {} } },
+        { name: "compact", selector: { boolean: {} } }
+      ]
+    }
+  ];
+}
+function prune(config) {
+  const out = {};
+  for (const [key, value] of Object.entries(config)) {
+    if (key in DEFAULT_BIKE_CONFIG) {
+      if (JSON.stringify(value) === JSON.stringify(DEFAULT_BIKE_CONFIG[key])) {
+        continue;
+      }
+    }
+    out[key] = value;
+  }
+  return out;
+}
+var NaolibBikeCardEditor = class extends HTMLElement {
+  setConfig(config) {
+    this._config = { ...DEFAULT_BIKE_CONFIG, ...config || {} };
+    this._render();
+  }
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+  _render() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.computeLabel = (schema) => LABELS[schema.name] || schema.name;
+      this._form.computeHelper = (schema) => HELPERS[schema.name] || "";
+      this._form.addEventListener(
+        "value-changed",
+        (ev) => this._valueChanged(ev)
+      );
+      this.appendChild(this._form);
+    }
+    this._form.hass = this._hass;
+    this._form.schema = buildSchema(this._hass, this._config);
+    this._form.data = this._config;
+  }
+  _valueChanged(ev) {
+    ev.stopPropagation();
+    this._config = { ...this._config, ...ev.detail.value };
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: prune(this._config) },
+        bubbles: true,
+        composed: true
+      })
+    );
+  }
+};
+
+// src/editor.js
+var LABELS2 = {
+  entity: "Entité (arrêt Naolib)",
+  title: "Titre",
+  lines: "Lignes",
+  direction: "Direction",
+  walk_time: "Temps de marche (minutes)",
+  max_lines: "Lignes affichées par direction",
+  show_timetable_button: "Bouton « Voir tous les horaires »",
+  compact: "Mode compact"
+};
+var HELPERS2 = {
+  title: "Laisser vide pour utiliser le nom de l'arrêt.",
+  lines: "Ne garder que ces lignes. Toutes les lignes si vide.",
+  walk_time: "Masque les départs qui ne peuvent plus être atteints à pied.",
+  max_lines: "Nombre maximum de lignes affichées dans chaque sens. En mode compact, nombre maximum de départs affichés.",
+  compact: "Une ligne par départ, sans regroupement par direction."
+};
+function lineOptions(hass, config) {
+  const state = hass.states[config.entity];
+  const departures2 = state?.attributes?.next_departures || [];
+  const lines = new Set(
+    departures2.map((departure) => String(departure.line ?? "")).filter(Boolean)
+  );
+  for (const line of config.lines) lines.add(String(line));
+  return [...lines].sort((a, b) => a.localeCompare(b, void 0, { numeric: true })).map((line) => ({ value: line, label: line }));
+}
+function buildSchema2(hass, config) {
+  return [
+    {
+      name: "entity",
+      required: true,
+      selector: {
+        entity: {
+          filter: [{ domain: "sensor", integration: "naolib" }],
+          // The integration also creates bike sensors, which this
+          // card cannot render.
+          include_entities: matchingEntities(
+            hass,
+            isDepartureEntity,
+            config.entity
+          )
+        }
+      }
+    },
+    { name: "title", selector: { text: {} } },
+    {
+      name: "lines",
+      selector: {
+        select: {
+          multiple: true,
+          custom_value: true,
+          options: lineOptions(hass, config)
+        }
+      }
+    },
+    {
+      name: "direction",
+      selector: {
+        select: {
+          mode: "dropdown",
+          options: [
+            { value: "0", label: "Les deux" },
+            { value: "1", label: "Direction 1" },
+            { value: "2", label: "Direction 2" }
+          ]
+        }
+      }
+    },
+    {
+      name: "",
+      type: "grid",
+      schema: [
+        {
+          name: "max_lines",
+          selector: {
+            number: { min: 1, max: MAX_LINES_LIMIT, mode: "box" }
+          }
+        },
+        {
+          name: "walk_time",
+          selector: {
+            number: {
+              min: 0,
+              max: MAX_WALK_TIME,
+              mode: "box",
+              unit_of_measurement: "min"
+            }
+          }
+        },
+        { name: "show_timetable_button", selector: { boolean: {} } },
+        { name: "compact", selector: { boolean: {} } }
+      ]
+    }
+  ];
+}
+function prune2(config) {
+  const out = {};
+  for (const [key, value] of Object.entries(config)) {
+    if (key in DEFAULT_CONFIG) {
+      if (JSON.stringify(value) === JSON.stringify(DEFAULT_CONFIG[key])) continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+var NaolibCardEditor = class extends HTMLElement {
+  setConfig(config) {
+    this._config = { ...DEFAULT_CONFIG, ...config || {} };
+    this._render();
+  }
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+  _render() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.computeLabel = (schema) => LABELS2[schema.name] || schema.name;
+      this._form.computeHelper = (schema) => HELPERS2[schema.name] || "";
+      this._form.addEventListener(
+        "value-changed",
+        (ev) => this._valueChanged(ev)
+      );
+      this.appendChild(this._form);
+    }
+    this._form.hass = this._hass;
+    this._form.schema = buildSchema2(this._hass, this._config);
+    this._form.data = { ...this._config, direction: String(this._config.direction) };
+  }
+  _valueChanged(ev) {
+    ev.stopPropagation();
+    const value = ev.detail.value;
+    this._config = {
+      ...this._config,
+      ...value,
+      direction: Number(value.direction ?? 0)
+    };
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: prune2(this._config) },
+        bubbles: true,
+        composed: true
+      })
+    );
+  }
+};
+
+// src/index.js
 function define(tag, elementClass) {
   try {
     customElements.define(tag, elementClass);
@@ -1061,12 +1574,25 @@ function define(tag, elementClass) {
 }
 define("naolib-card", NaolibCard);
 define("naolib-card-editor", NaolibCardEditor);
-window.customCards = window.customCards || [];
-if (!window.customCards.some((card) => card.type === "naolib-card")) {
-  window.customCards.push({
+define("naolib-bike-card", NaolibBikeCard);
+define("naolib-bike-card-editor", NaolibBikeCardEditor);
+var CARDS = [
+  {
     type: "naolib-card",
     name: "Naolib Nantes",
     preview: true,
     description: "Affiche les prochains départs (Bus/Tram) pour un arrêt donné."
-  });
+  },
+  {
+    type: "naolib-bike-card",
+    name: "Naolib Vélo",
+    preview: true,
+    description: "Affiche les vélos et places disponibles d'une station Naolib et de ses voisines."
+  }
+];
+window.customCards = window.customCards || [];
+for (const card of CARDS) {
+  if (!window.customCards.some((known) => known.type === card.type)) {
+    window.customCards.push(card);
+  }
 }

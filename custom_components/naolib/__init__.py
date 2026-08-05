@@ -21,6 +21,7 @@ from homeassistant.loader import async_get_integration
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
+from .bike import NaolibBikeCoordinator, NaolibBikeStation
 from .const import (
     ATTR_CONFIG_ENTRY_ID,
     ATTR_DIRECTION,
@@ -28,12 +29,16 @@ from .const import (
     ATTR_LINES,
     ATTR_WALK_TIME,
     CARD_URL_PATH,
+    CONF_ENTRY_TYPE,
     CONF_QUAYS,
+    CONF_STATION_ID,
+    CONF_STATION_LABEL,
     CONF_STOP_CODE,
     CONF_STOP_LABEL,
     CONF_UPDATE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    ENTRY_TYPE_BIKE,
     LOADER_FILENAME,
     MAX_TIMETABLE_DAY_OFFSET,
     PLATFORMS,
@@ -64,8 +69,17 @@ GET_DEPARTURES_SCHEMA = vol.Schema(
     }
 )
 
-# Type alias for an entry carrying the shared coordinator as runtime data.
-type NaolibConfigEntry = ConfigEntry[NaolibGlobalCoordinator]
+# Type alias for an entry carrying its coordinator as runtime data. Which one
+# depends on what the entry tracks: a stop or a bike station.
+type NaolibConfigEntry = ConfigEntry[NaolibGlobalCoordinator | NaolibBikeCoordinator]
+
+
+def _is_bike(entry: ConfigEntry) -> bool:
+    """Tell whether an entry tracks a bike station.
+
+    Entries created before bike support have no type and are stops.
+    """
+    return entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_BIKE
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -74,7 +88,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     Called once per Home Assistant start, before any entry is set up, so
     nothing here depends on the entry load/unload cycle.
     """
-    hass.data[DOMAIN] = NaolibData(NaolibGlobalCoordinator(hass))
+    hass.data[DOMAIN] = NaolibData(
+        NaolibGlobalCoordinator(hass), NaolibBikeCoordinator(hass)
+    )
     websocket_api.async_register_command(hass, handle_get_data)
     hass.services.async_register(
         DOMAIN,
@@ -102,6 +118,12 @@ async def _async_get_departures(call: ServiceCall) -> ServiceResponse:
         raise ServiceValidationError(
             translation_domain=DOMAIN,
             translation_key="entry_not_loaded",
+            translation_placeholders={"target": entry.title},
+        )
+    if _is_bike(entry):
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="entry_wrong_type",
             translation_placeholders={"target": entry.title},
         )
 
@@ -153,6 +175,23 @@ async def async_frontend_diagnostics(hass: HomeAssistant) -> dict[str, Any]:
 
 async def async_setup_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bool:
     """Set up the integration from a config entry."""
+    if _is_bike(entry):
+        if not await _async_setup_bike_entry(hass, entry):
+            return False
+    elif not await _async_setup_stop_entry(hass, entry):
+        return False
+
+    # Reload the entry when its options change
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    return True
+
+
+async def _async_setup_stop_entry(
+    hass: HomeAssistant, entry: NaolibConfigEntry
+) -> bool:
+    """Register a stop on the departures coordinator."""
     coordinator = hass.data[DOMAIN].coordinator
 
     stop_code = entry.data.get(CONF_STOP_CODE)
@@ -189,20 +228,50 @@ async def async_setup_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bo
     # added later needs a refresh too, since the snapshot only holds the quays
     # that were registered when it was taken; the debouncer collapses the
     # requests fired when several entries are set up at once.
+    _schedule_refresh(hass, entry, coordinator)
+    entry.runtime_data = coordinator
+    return True
+
+
+async def _async_setup_bike_entry(
+    hass: HomeAssistant, entry: NaolibConfigEntry
+) -> bool:
+    """Register a bike station on the bike coordinator."""
+    coordinator = hass.data[DOMAIN].bike_coordinator
+
+    station_id = entry.data.get(CONF_STATION_ID)
+    if not station_id:
+        _LOGGER.error("Station id missing from configuration")
+        return False
+
+    coordinator.register_station(
+        entry.entry_id,
+        NaolibBikeStation(
+            id=station_id,
+            name=entry.data.get(CONF_STATION_LABEL) or station_id,
+            interval=int(
+                entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
+            ),
+        ),
+    )
+
+    _schedule_refresh(hass, entry, coordinator)
+    entry.runtime_data = coordinator
+    return True
+
+
+def _schedule_refresh(
+    hass: HomeAssistant,
+    entry: NaolibConfigEntry,
+    coordinator: NaolibGlobalCoordinator | NaolibBikeCoordinator,
+) -> None:
+    """Warm up the coordinator without blocking (or failing) the setup."""
     refresh = (
         coordinator.async_refresh()
         if coordinator.data is None
         else coordinator.async_request_refresh()
     )
     entry.async_create_background_task(hass, refresh, "naolib_refresh")
-
-    entry.runtime_data = coordinator
-
-    # Reload the entry when its options change
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
-
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    return True
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: NaolibConfigEntry) -> None:
@@ -252,5 +321,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> b
     """
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
-        hass.data[DOMAIN].coordinator.unregister_stop(entry.entry_id)
+        if _is_bike(entry):
+            hass.data[DOMAIN].bike_coordinator.unregister_station(entry.entry_id)
+        else:
+            hass.data[DOMAIN].coordinator.unregister_stop(entry.entry_id)
     return unloaded

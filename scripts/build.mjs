@@ -10,7 +10,7 @@ const outDir = path.join(root, "custom_components", "naolib", "www");
 // documented in the 2.5.0 beta cycle.
 const entries = [
     { in: "src/loader.js", out: "naolib-loader.js" },
-    { in: "src/card.js", out: "naolib-card.js" },
+    { in: "src/index.js", out: "naolib-card.js" },
 ];
 
 const banner = [

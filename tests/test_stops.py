@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from custom_components.naolib.stops import load_stops, nearby_stops, search_stops
+from custom_components.naolib.stops import load_stops, nearby_stops, normalize
 
 # Commerce, in the centre of Nantes.
 _LAT, _LON = 47.2143, -1.5595
@@ -34,19 +34,6 @@ def test_unreadable_index_is_tolerated() -> None:
     load_stops.cache_clear()
 
 
-def test_search_stops_matches_a_partial_name() -> None:
-    """Typing part of a name is enough, and exact prefixes come first."""
-    stops = search_stops("comme")
-
-    assert stops
-    assert stops[0]["name"] == "Commerce"
-
-
-def test_search_stops_ignores_case_and_accents() -> None:
-    """Accents and case are folded on both sides of the comparison."""
-    assert search_stops("GARE DE L'ETAT")[0]["name"] == "Gare de l'État"
-
-
-def test_search_stops_without_a_query() -> None:
-    """A blank query matches nothing rather than the whole network."""
-    assert search_stops("   ") == []
+def test_normalize_folds_case_and_accents() -> None:
+    """The sort key ignores case and accents, so "État" lands next to "Etat"."""
+    assert normalize("Gare de l'État") == normalize("GARE DE L'ETAT")

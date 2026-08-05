@@ -18,8 +18,6 @@ export const base = `
     .time { font-weight: bold; font-size: 1.1em; padding: 4px 8px; border-radius: 4px; white-space: nowrap; background: var(--naolib-neutral); color: var(--primary-text-color); }
     .urgent { background-color: rgba(231, 76, 60, 0.2); color: var(--naolib-urgent); }
     .warning { background-color: rgba(241, 196, 15, 0.2); color: var(--naolib-warning); }
-    .time-meta { font-size: 0.65em; font-weight: 700; white-space: nowrap; padding: 2px 6px; border-radius: 10px; }
-    .time-meta.last { background: var(--naolib-neutral-strong); color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.5px; }
     .button { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: var(--primary-color); font-weight: 500; padding: 6px 12px; border-radius: 4px; transition: background 0.2s; background: none; border: none; font-family: inherit; font-size: inherit; }
     .button:hover { background-color: rgba(var(--rgb-primary-color), 0.1); }
     .button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }

@@ -19,6 +19,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .api import NaolibApiClient
+from .bike import NaolibBikeCoordinator
 from .const import DEFAULT_UPDATE_INTERVAL, DOMAIN
 from .schedules import last_departures
 
@@ -136,6 +137,7 @@ class NaolibData:
     """State shared by every config entry, stored in ``hass.data``."""
 
     coordinator: NaolibGlobalCoordinator
+    bike_coordinator: NaolibBikeCoordinator
     loader_url: str = ""
 
 

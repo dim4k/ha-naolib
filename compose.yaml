@@ -1,0 +1,70 @@
+# Reproducible test runners: the Python 3.13 toolchain the Home Assistant test
+# harness needs, and the Node bundler, without installing either on the host.
+#
+#   docker compose run --rm python        # ruff + pytest
+#   docker compose run --rm node          # eslint + vitest + build
+#   docker compose run --rm python pytest tests/test_bike.py -x
+#
+# Dependencies are cached in named volumes, so only the first run downloads them.
+
+services:
+    python:
+        # Not the slim variant: a few Home Assistant dependencies (lru-dict)
+        # ship no wheel for 3.13 and are compiled on install.
+        image: python:3.13
+        working_dir: /app
+        volumes:
+            - .:/app
+            - python-venv:/opt/venv
+            - pip-cache:/root/.cache/pip
+        environment:
+            # Keep __pycache__ out of the bind-mounted sources, where the
+            # container writes as root.
+            PYTHONDONTWRITEBYTECODE: "1"
+            VIRTUAL_ENV: /opt/venv
+            PATH: /opt/venv/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+        entrypoint:
+            - bash
+            - -c
+            - |
+                set -e
+                [ -x /opt/venv/bin/python ] || python -m venv /opt/venv
+                pip install --quiet --upgrade pip
+                pip install --quiet -r requirements_test.txt ruff
+                status=0
+                "$$@" || status=$$?
+                chown -R "$$(stat -c '%u:%g' /app)" .coverage htmlcov 2>/dev/null || true
+                exit $$status
+            - --
+        command:
+            - bash
+            - -c
+            - ruff check . && ruff format --check . && pytest -p no:cacheprovider
+
+    node:
+        image: node:22-alpine
+        working_dir: /app
+        volumes:
+            - .:/app
+            - node-modules:/app/node_modules
+            - npm-cache:/root/.npm
+        entrypoint:
+            - sh
+            - -c
+            - |
+                set -e
+                [ -d node_modules/.bin ] || npm ci
+                status=0
+                "$$@" || status=$$?
+                # The build writes the committed bundles: hand them back to the
+                # user who owns the checkout.
+                chown -R "$$(stat -c '%u:%g' /app)" custom_components/naolib/www || true
+                exit $$status
+            - --
+        command: ["npm", "run", "check"]
+
+volumes:
+    python-venv:
+    pip-cache:
+    node-modules:
+    npm-cache:

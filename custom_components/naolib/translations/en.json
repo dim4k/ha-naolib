@@ -3,10 +3,26 @@
         "step": {
             "user": {
                 "title": "Naolib Nantes Configuration",
-                "description": "How do you want to look for the stop?",
+                "description": "What do you want to track?",
                 "menu_options": {
-                    "by_location": "Search around a location",
-                    "by_name": "Search by name"
+                    "stop": "A stop (bus, tram, ferry)",
+                    "bike": "A bike station"
+                }
+            },
+            "stop": {
+                "title": "Stop selection",
+                "description": "How do you want to pick the stop?",
+                "menu_options": {
+                    "by_list": "Pick from the list",
+                    "by_location": "Search around a location"
+                }
+            },
+            "bike": {
+                "title": "Bike station selection",
+                "description": "How do you want to pick the station?",
+                "menu_options": {
+                    "bike_by_list": "Pick from the list",
+                    "bike_by_location": "Search around a location"
                 }
             },
             "by_location": {
@@ -19,16 +35,6 @@
                     "location": "Move the marker to the area where you want to look for stops. Defaults to your home location."
                 }
             },
-            "by_name": {
-                "title": "Search by name",
-                "description": "Type part of the stop name.",
-                "data": {
-                    "query": "Stop name"
-                },
-                "data_description": {
-                    "query": "For example \"comme\" finds \"Commerce\". Case and accents are ignored."
-                }
-            },
             "select_stop": {
                 "title": "Stop selection",
                 "description": "Select the stop to track.",
@@ -36,17 +42,42 @@
                     "stop_code": "Stop"
                 },
                 "data_description": {
-                    "stop_code": "Matching stops, with their distance when searched from the map."
+                    "stop_code": "Type a few letters to filter the list. The distance is shown when searching from the map."
+                }
+            },
+            "bike_by_location": {
+                "title": "Search around a location",
+                "description": "Pick a location on the map to search for nearby bike stations.",
+                "data": {
+                    "location": "Location"
+                },
+                "data_description": {
+                    "location": "Move the marker to the area where you want to look for stations. Defaults to your home location."
+                }
+            },
+            "select_station": {
+                "title": "Bike station selection",
+                "description": "Select the station to track.",
+                "data": {
+                    "station_id": "Station"
+                },
+                "data_description": {
+                    "station_id": "Type a few letters to filter the list. The distance is shown when searching from the map."
                 }
             }
         },
         "error": {
             "no_stops_found": "No matching stop found.",
+            "no_stations_found": "No matching bike station found.",
+            "cannot_connect": "Could not reach the Naolib bike service.",
             "unknown": "Unexpected error."
         },
         "abort": {
-            "already_configured": "This stop is already configured.",
-            "reconfigure_successful": "Stop updated successfully."
+            "already_configured": "This stop or station is already configured.",
+            "cannot_connect": "Could not reach the Naolib bike service.",
+            "no_stops_found": "No stop available.",
+            "no_stations_found": "No bike station available.",
+            "reconfigure_successful": "Configuration updated successfully."
         }
     },
     "options": {
@@ -67,6 +98,12 @@
         "sensor": {
             "next_departures": {
                 "name": "Next departures"
+            },
+            "bikes_available": {
+                "name": "Bikes available"
+            },
+            "docks_available": {
+                "name": "Docks available"
             }
         }
     },
@@ -104,6 +141,9 @@
         },
         "entry_not_loaded": {
             "message": "The stop {target} is not loaded."
+        },
+        "entry_wrong_type": {
+            "message": "{target} is a bike station: this action only applies to stops."
         }
     }
 }

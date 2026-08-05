@@ -16,7 +16,11 @@ function departure(overrides) {
 }
 
 function render(items, config = normalizeConfig({}), stopCode = "COMM1") {
-    return renderDepartures(prepareDepartures(items, config, NOW), stopCode, config);
+    return renderDepartures(
+        prepareDepartures(items, config, NOW),
+        stopCode,
+        config,
+    );
 }
 
 describe("renderDepartures", () => {
@@ -28,7 +32,10 @@ describe("renderDepartures", () => {
 
     it("hides the timetable button when disabled or without a stop", () => {
         expect(
-            render([departure()], normalizeConfig({ show_timetable_button: false })),
+            render(
+                [departure()],
+                normalizeConfig({ show_timetable_button: false }),
+            ),
         ).not.toContain("schedule-btn");
         expect(render([departure()], normalizeConfig({}), "")).not.toContain(
             "schedule-btn",
@@ -38,7 +45,9 @@ describe("renderDepartures", () => {
     it("groups the departures of a line and destination on one tile", () => {
         const html = render([
             departure(),
-            departure({ expected_ts: new Date(NOW + 12 * 60000).toISOString() }),
+            departure({
+                expected_ts: new Date(NOW + 12 * 60000).toISOString(),
+            }),
         ]);
         expect(html.match(/class="tile"/g)).toHaveLength(1);
         expect(html).toContain("5 mn");
@@ -65,15 +74,45 @@ describe("renderDepartures", () => {
     it("shows the theoretical time struck through and the last-departure marker", () => {
         const html = render([departure({ delay_minutes: 4, is_last: true })]);
         expect(html).toContain('class="clock aimed">14:01<');
-        expect(html).toContain('class="clock late"');
+        expect(html).toContain('class="clock strong late"');
         expect(html).toContain("14:05");
         expect(html).toContain("dernier");
     });
 
     it("keeps a single clock for delays within the tolerance", () => {
         const html = render([departure({ delay_minutes: 1 })]);
-        expect(html).toContain('class="clock">14:05<');
+        expect(html).toContain('class="clock strong">14:05<');
         expect(html).not.toContain("clock aimed");
+    });
+
+    it("moves the following departure into the strip", () => {
+        const html = render([
+            departure(),
+            departure({
+                expected_ts: new Date(NOW + 12 * 60000).toISOString(),
+            }),
+        ]);
+        expect(html).toContain("puis 12 mn (");
+        expect(html).toContain("14:12");
+    });
+
+    it("tints the strip on a delay, then on the last departure", () => {
+        expect(render([departure({ delay_minutes: 4 })])).toContain(
+            'class="strip late"',
+        );
+        expect(render([departure({ is_last: true })])).toContain(
+            'class="strip final"',
+        );
+        expect(render([departure()])).toContain('class="strip"');
+    });
+
+    it("drops the strip in compact mode", () => {
+        const html = render(
+            [departure({ delay_minutes: 4 })],
+            normalizeConfig({ compact: true }),
+        );
+        expect(html).not.toContain("strip");
+        expect(html).toContain('title="14:05"');
     });
 
     it("drops the direction sections in compact mode", () => {

@@ -12,11 +12,15 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.naolib.const import (
     ATTR_CONFIG_ENTRY_ID,
+    CONF_ENTRY_TYPE,
     CONF_QUAYS,
+    CONF_STATION_ID,
+    CONF_STATION_LABEL,
     CONF_STOP_CODE,
     CONF_STOP_LABEL,
     CONF_UPDATE_INTERVAL,
     DOMAIN,
+    ENTRY_TYPE_BIKE,
     SERVICE_GET_DEPARTURES,
 )
 from custom_components.naolib.diagnostics import async_get_config_entry_diagnostics
@@ -283,3 +287,147 @@ async def test_diagnostics(hass: HomeAssistant) -> None:
     assert diagnostics["coordinator"]["indexed_quays"] == 1
     assert diagnostics["coordinator"]["total_departures"] == 1
     assert diagnostics["frontend"]["loader_url"].startswith("/naolib_static/")
+
+
+_BIKE_NETWORK = {
+    "1": {
+        "id": "1",
+        "name": "PRÉFECTURE",
+        "lat": 47.21984,
+        "lon": -1.554891,
+        "address": "Place du Port Communeau",
+        "capacity": 33,
+        "bikes": 7,
+        "docks": 26,
+        "is_installed": True,
+        "is_renting": True,
+        "is_returning": True,
+        "last_reported": "2026-08-05T10:02:04Z",
+    },
+    "2": {
+        "id": "2",
+        "name": "COMMERCE",
+        "lat": 47.2143,
+        "lon": -1.5595,
+        "address": "",
+        "capacity": 20,
+        "bikes": 0,
+        "docks": 20,
+        "is_installed": True,
+        "is_renting": False,
+        "is_returning": True,
+        "last_reported": "2026-08-05T10:03:00Z",
+    },
+}
+
+
+def _bike_entry(station_id: str = "1") -> MockConfigEntry:
+    return MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=f"bike_{station_id}",
+        title=f"Station vélo : {station_id}",
+        data={
+            CONF_ENTRY_TYPE: ENTRY_TYPE_BIKE,
+            CONF_STATION_ID: station_id,
+            CONF_STATION_LABEL: f"Station {station_id}",
+        },
+    )
+
+
+async def _setup_bike(hass: HomeAssistant, entry: MockConfigEntry) -> None:
+    entry.add_to_hass(hass)
+    with patch(
+        "custom_components.naolib.bike.NaolibBikeCoordinator._async_update_data",
+        return_value=_BIKE_NETWORK,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_bike_setup_and_unload(hass: HomeAssistant) -> None:
+    """A station is registered on setup and dropped on unload."""
+    entry = _bike_entry()
+    await _setup_bike(hass, entry)
+
+    assert entry.state is ConfigEntryState.LOADED
+    coordinator = hass.data[DOMAIN].bike_coordinator
+    assert coordinator.stations[entry.entry_id].id == "1"
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert coordinator.stations == {}
+
+
+async def test_bike_setup_fails_without_a_station_id(hass: HomeAssistant) -> None:
+    """An entry with no station id cannot be served."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={CONF_ENTRY_TYPE: ENTRY_TYPE_BIKE}, title="Broken"
+    )
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+
+
+async def test_bike_sensors_expose_the_station(hass: HomeAssistant) -> None:
+    """Both sensors publish the station identity and its counters."""
+    await _setup_bike(hass, _bike_entry())
+
+    states = [
+        state
+        for state in hass.states.async_all("sensor")
+        if state.attributes.get("station_id") == "1"
+    ]
+    assert len(states) == 2
+
+    bikes = next(state for state in states if "nearby_stations" in state.attributes)
+    assert bikes.state == "7"
+    assert bikes.attributes["station_label"] == "PRÉFECTURE"
+    assert bikes.attributes["docks_available"] == 26
+    assert bikes.attributes["capacity"] == 33
+    assert [
+        station["station_id"] for station in bikes.attributes["nearby_stations"]
+    ] == ["2"]
+
+    docks = next(state for state in states if "nearby_stations" not in state.attributes)
+    assert docks.state == "26"
+    assert docks.attributes["capacity"] == 33
+
+
+async def test_bike_entries_share_one_coordinator(hass: HomeAssistant) -> None:
+    """A second station reuses the coordinator instead of polling on its own."""
+    first = _bike_entry("1")
+    second = _bike_entry("2")
+    await _setup_bike(hass, first)
+    await _setup_bike(hass, second)
+
+    assert first.runtime_data is second.runtime_data
+    assert len(first.runtime_data.stations) == 2
+
+
+async def test_action_rejects_a_bike_entry(hass: HomeAssistant) -> None:
+    """get_departures only makes sense for a stop."""
+    entry = _bike_entry()
+    await _setup_bike(hass, entry)
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_DEPARTURES,
+            {ATTR_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+
+
+async def test_bike_diagnostics(hass: HomeAssistant) -> None:
+    """Diagnostics report the bike snapshot instead of the departures one."""
+    entry = _bike_entry()
+    await _setup_bike(hass, entry)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["entry"]["data"][CONF_STATION_ID] == "1"
+    assert diagnostics["coordinator"]["indexed_stations"] == 2
+    assert diagnostics["coordinator"]["total_bikes_available"] == 7
+    assert diagnostics["coordinator"]["total_docks_available"] == 46

@@ -6,12 +6,19 @@ DOMAIN: str = "naolib"
 PLATFORMS: list[str] = ["sensor"]
 
 # Configuration Keys
+CONF_ENTRY_TYPE: str = "entry_type"
 CONF_STOP_CODE: str = "stop_code"
 CONF_STOP_LABEL: str = "stop_label"
 CONF_QUAYS: str = "quays"
+CONF_STATION_ID: str = "station_id"
+CONF_STATION_LABEL: str = "station_label"
 CONF_LOCATION: str = "location"
-CONF_QUERY: str = "query"
 CONF_UPDATE_INTERVAL: str = "update_interval"
+
+# An entry either tracks a transit stop or a bike-sharing station. Entries
+# created before the bike support have no type and are stops.
+ENTRY_TYPE_STOP: str = "stop"
+ENTRY_TYPE_BIKE: str = "bike"
 
 # Action exposing the departures to scripts and automations.
 SERVICE_GET_DEPARTURES: str = "get_departures"
@@ -34,6 +41,21 @@ SIRI_URL: str = "https://api.okina.fr/gateway/sem/realtime/anshar/services/NAOLI
 SIRI_REQUESTOR_REF: str = "ha-naolib"
 SIRI_NAMESPACE: str = "http://www.siri.org.uk/siri"
 
+# Naolib bike-sharing (ex-Bicloo) GBFS 3.0 feeds, operated by JCDecaux under
+# the Cyclocity umbrella. Keyless, and referenced as the official source on
+# transport.data.gouv.fr.
+GBFS_BASE_URL: str = "https://api.cyclocity.fr/contracts/nantes/gbfs/v3"
+GBFS_STATION_INFORMATION_URL: str = f"{GBFS_BASE_URL}/station_information.json"
+GBFS_STATION_STATUS_URL: str = f"{GBFS_BASE_URL}/station_status.json"
+
+# The station list barely changes; the feed itself advertises a 1 hour TTL.
+GBFS_INFO_TTL: int = 3600
+
+# Upper bounds for the nearby stations exposed as a sensor attribute. The card
+# narrows this list down further with its own radius and count.
+BIKE_NEARBY_LIMIT: int = 10
+BIKE_NEARBY_RADIUS_M: int = 1000
+
 # Embedded stop index (generated from the GTFS feed by scripts/).
 STOPS_INDEX_FILE: str = "data/stops_index.json"
 
@@ -51,8 +73,8 @@ CALENDAR_FILE: str = "data/calendar.json"
 # How far ahead the card may ask for a timetable, in days.
 MAX_TIMETABLE_DAY_OFFSET: int = 6
 
-# Number of nearby stops proposed in the config flow.
+# Number of stops proposed when searching around a location.
 NEARBY_STOPS_LIMIT: int = 15
 
-# Number of stops proposed when searching by name.
-SEARCH_STOPS_LIMIT: int = 25
+# Number of bike stations proposed when searching around a location.
+NEARBY_STATIONS_LIMIT: int = 15

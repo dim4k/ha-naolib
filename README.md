@@ -1,109 +1,132 @@
-# Naolib Nantes for Home Assistant
+<p align="center">
+  <img src="https://github.com/dim4k/ha-naolib/blob/main/custom_components/naolib/brand/icon.png?raw=true" width="96" alt="">
+</p>
 
-[![HACS Custom](https://img.shields.io/badge/HACS-custom-41BDF5.svg)](https://hacs.xyz)
-[![Release](https://img.shields.io/github/v/release/dim4k/ha-naolib?include_prereleases)](https://github.com/dim4k/ha-naolib/releases)
-[![Hassfest](https://github.com/dim4k/ha-naolib/actions/workflows/hassfest.yaml/badge.svg)](https://github.com/dim4k/ha-naolib/actions/workflows/hassfest.yaml)
-[![HACS](https://github.com/dim4k/ha-naolib/actions/workflows/hacs.yaml/badge.svg)](https://github.com/dim4k/ha-naolib/actions/workflows/hacs.yaml)
-[![License](https://img.shields.io/github/license/dim4k/ha-naolib)](LICENSE)
+<h1 align="center">Naolib Nantes for Home Assistant</h1>
 
-Real-time bus and tram departures for the **Naolib** network (Nantes, France), with a
-dashboard card included. Pick a stop near you during setup, add the card, and you are done:
-no YAML, no API key, no external dependency.
+<p align="center">
+  <a href="https://hacs.xyz"><img src="https://img.shields.io/badge/HACS-default-41BDF5.svg" alt="HACS Default"></a>
+  <a href="https://github.com/dim4k/ha-naolib/releases"><img src="https://img.shields.io/github/v/release/dim4k/ha-naolib?include_prereleases" alt="Release"></a>
+  <a href="https://github.com/dim4k/ha-naolib/actions/workflows/hassfest.yaml"><img src="https://github.com/dim4k/ha-naolib/actions/workflows/hassfest.yaml/badge.svg" alt="Hassfest"></a>
+  <a href="https://github.com/dim4k/ha-naolib/actions/workflows/hacs.yaml"><img src="https://github.com/dim4k/ha-naolib/actions/workflows/hacs.yaml/badge.svg" alt="HACS"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/dim4k/ha-naolib" alt="License"></a>
+</p>
 
-![Naolib card](https://github.com/dim4k/ha-naolib/blob/main/screenshot.png?raw=true)
+<p align="center">
+  Real-time bus, tram and ferry departures for the <b>Naolib</b> network (Nantes, France),<br>
+  plus the availability of its bike-sharing stations
+</p>
+
+![Naolib cards](https://github.com/dim4k/ha-naolib/blob/main/screenshot.png?raw=true)
+
+<p align="center">
+  <sub>Unofficial project, not affiliated with Semitan, Nantes Métropole, Okina or JCDecaux.</sub>
+</p>
 
 ## Features
 
--   **Real-time departures** from the official SIRI feed, with a countdown that keeps ticking between refreshes.
--   **Delay indicator** comparing the expected time to the theoretical timetable.
--   **Last departure of the day** flagged per line and direction, from the embedded timetable.
--   **Guided setup**: search a stop around a location on the map, or by typing part of its name.
--   **Full daily timetable** available from the card, fetched on demand, for today and the six days ahead.
--   **Sensor entities** exposing every upcoming departure for your own automations.
-
-## Requirements
-
-Home Assistant 2025.2 or newer. Nothing else: the integration ships its own card and needs
-no account, token or extra download.
+- **Real-time departures** from the official SIRI feed, with a ticking countdown, a delay
+  indicator and the last departure of the day flagged per line.
+- **Bike stations** (ex-Bicloo) with bikes and docks available, plus the neighbouring stations
+  when yours is empty or full.
+- **Full daily timetable** fetched on demand from the card, for today and the six days ahead.
+- **Guided setup** from a searchable list or a map, and **sensor entities** carrying every
+  upcoming departure for your automations.
 
 ## Installation
 
-### HACS (recommended)
+Requires Home Assistant 2025.2 or newer — nothing else, the integration ships its own cards.
 
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=dim4k&repository=ha-naolib&category=integration)
 
-1.  In HACS, open the menu (three dots) and choose **Custom repositories**.
-2.  Add `https://github.com/dim4k/ha-naolib` with the **Integration** category.
-3.  Download **Naolib Nantes**, then restart Home Assistant.
-
-### Manual
-
-Copy `custom_components/naolib` into your `config/custom_components` folder, then restart
-Home Assistant.
+Search for **Naolib Nantes** in HACS, download it, then restart Home Assistant. For a manual
+install, copy `custom_components/naolib` into `config/custom_components` and restart.
 
 ## Configuration
 
 [![Add integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=naolib)
 
-Go to **Settings** > **Devices & services** > **Add integration**, search for **Naolib**,
-then choose how to look for your stop:
+Add the **Naolib** integration, choose what to track — **a stop** (bus, tram, ferry) or **a
+bike station** — then pick it from the searchable list of the whole network, or on a map
+around a location (your home coordinates are pre-filled, distances included).
 
--   **Around a location**: confirm the point to search around (your home coordinates are
-    pre-filled) and pick your stop from the closest ones.
--   **By name**: type part of the stop name (`comme` finds `Commerce`; case and accents are
-    ignored) and pick it from the matches.
+Entities are created right away; repeat to follow several stops or stations. The refresh
+interval (60 s by default, 30 to 600 s) is set from the **Configure** button. Deleting an
+entry removes its device, entities and history; cards already added to a dashboard have to be
+removed by hand.
 
-The entities are created right away.
+## Dashboard cards
 
-Repeat the process to follow several stops. The refresh interval, 60 seconds by default,
-can be changed between 30 and 600 seconds from the **Configure** button of the integration.
+Both cards are registered by the integration, so they show up in the card picker, and every
+option below is also available from their visual editor.
 
-### Removal
-
-Go to **Settings** > **Devices & services** > **Naolib Nantes**, open the menu of the stop
-you want to drop and choose **Delete**; its device, entities and history go with it.
-
-To uninstall completely, remove every stop, then delete **Naolib Nantes** from HACS (or
-delete `config/custom_components/naolib` for a manual install) and restart Home Assistant.
-The card and its dashboard resource are removed with the integration; the cards left on
-your dashboards have to be deleted by hand.
-
-## Dashboard card
-
-The card is registered by the integration, so it shows up in the card picker as **Naolib
-Nantes**: edit your dashboard, click **Add card**, search for **Naolib** and select the
-entity of the stop to display.
-
-The YAML equivalent is:
+### Departures — `custom:naolib-card`
 
 ```yaml
 type: custom:naolib-card
 entity: sensor.<your_stop>_next_departures
 ```
 
-The card lists the two next departures per line and direction, with the delay and last
-departure markers underneath. The **Voir tous les horaires** button opens the timetable view:
-pick a line from the chips at the top, switch direction, and the whole day shows up as one
-tile per hour, scrolled to the current one with the next passage highlighted. That view is
-theoretical only — realtime belongs to the departures view above.
+Lists the two next departures per line and direction. The **Voir tous les horaires** button
+opens the timetable view: pick a line, switch direction, and the whole day shows up as one
+tile per hour, scrolled to the current one. That view is theoretical only.
 
-All options are available from the visual editor:
-
-| Option                  | Default | Description                                             |
-| ----------------------- | ------- | ------------------------------------------------------- |
-| `entity`                | —       | Sensor of the stop to display (required)                 |
-| `title`                 | stop    | Override the card title                                  |
-| `lines`                 | all     | Only keep these line numbers                             |
-| `direction`             | `0`     | `0` both directions, `1` or `2` to keep only one         |
+| Option                  | Default | Description                                               |
+| ----------------------- | ------- | --------------------------------------------------------- |
+| `entity`                | —       | Sensor of the stop to display (required)                  |
+| `title`                 | stop    | Override the card title                                   |
+| `lines`                 | all     | Only keep these line numbers                              |
+| `direction`             | `0`     | `0` both directions, `1` or `2` to keep only one          |
 | `walk_time`             | `0`     | Minutes of walk: hides departures you can no longer catch |
-| `max_lines`             | `6`     | Maximum rows per direction (per card when compact)       |
-| `show_timetable_button` | `true`  | Show the full timetable button                           |
-| `compact`               | `false` | One line per departure, without direction grouping       |
+| `max_lines`             | `6`     | Maximum rows per direction (per card when compact)        |
+| `show_timetable_button` | `true`  | Show the full timetable button                            |
+| `compact`               | `false` | One line per departure, without direction grouping        |
 
-## Action
+### Bike station — `custom:naolib-bike-card`
 
-`naolib.get_departures` returns the filtered departures of a stop, which is handy in
-scripts and templates:
+```yaml
+type: custom:naolib-bike-card
+entity: sensor.<your_station>_bikes_available
+```
+
+Shows the bikes and docks available, a gauge of how full the station is, a warning when
+renting or returning is suspended, and the neighbouring stations with their distance.
+
+| Option          | Default | Description                                        |
+| --------------- | ------- | -------------------------------------------------- |
+| `entity`        | —       | “Bikes available” sensor of the station (required) |
+| `title`         | station | Override the card title                            |
+| `nearby_count`  | `3`     | Neighbouring stations listed, `0` to hide them     |
+| `nearby_radius` | `500`   | Only list the stations within this many meters     |
+| `show_docks`    | `true`  | Show the free docks next to the bikes              |
+| `compact`       | `false` | Hide the fill gauge                                |
+
+## Entities
+
+**A stop** creates one sensor whose state is the timestamp of the very next departure
+(`device_class: timestamp`). Its `next_departures` attribute holds the ordered list of
+upcoming departures, each with `line`, `type` (`1` tram, `2` busway, `3` bus, `4` ferry),
+`destination`, `direction`, `time` (`proche`, `4 mn`…), `expected_ts`, `delay_minutes` and
+`is_last`. `stop_code` and `stop_label` identify the stop.
+
+**A bike station** creates two sensors, **Bikes available** and **Docks available**. The first
+carries the station details:
+
+| Attribute         | Description                                                    |
+| ----------------- | -------------------------------------------------------------- |
+| `station_id`      | Station identifier on the network                              |
+| `station_label`   | Station name as shown in the UI                                |
+| `address`         | Street address of the station                                  |
+| `capacity`        | Total number of docks                                          |
+| `docks_available` | Free docks, mirrored from the second sensor                    |
+| `is_renting`      | `false` when no bike can be taken out                          |
+| `is_returning`    | `false` when no bike can be given back                         |
+| `last_reported`   | Operator timestamp. Unreliable, so it is not shown on the card |
+| `nearby_stations` | Neighbouring stations with their distance and counters         |
+
+## Automations
+
+The `naolib.get_departures` action returns the filtered departures of a stop:
 
 ```yaml
 action: naolib.get_departures
@@ -115,76 +138,48 @@ data:
 response_variable: departures
 ```
 
-## Entities
-
-Each stop creates one sensor whose state is the timestamp of the very next departure
-(`device_class: timestamp`), so relative time formatting works out of the box.
-
-| Attribute         | Description                          |
-| ----------------- | ------------------------------------ |
-| `stop_code`       | Stop identifier on the network       |
-| `stop_label`      | Stop name as shown in the UI         |
-| `next_departures` | Ordered list of upcoming departures  |
-
-Every departure holds `line`, `type` (`bus` or `tram`), `destination`, `direction`, `time`
-(human readable, such as `proche` or `4 mn`), `expected_ts` (ISO timestamp), `delay_minutes`
-and `is_last`.
-
-```yaml
-automation:
-    - alias: "Leave for the tram"
-      triggers:
-          - trigger: template
-            value_template: >
-                {{ state_attr('sensor.commerce_next_departures', 'next_departures')
-                   | selectattr('line', 'eq', '1')
-                   | selectattr('time', 'eq', '5 mn')
-                   | list | count > 0 }}
-      actions:
-          - action: notify.mobile_app
-            data:
-                message: "Tram 1 in 5 minutes."
-```
+The `next_departures` attribute works just as well in a template trigger, without any call.
 
 ## How it works
 
--   **One request for the whole network.** A single SIRI `StopMonitoring` call returns every
-    monitored stop, so watching ten stops costs no more than watching one.
--   **Timetables stay out of the database.** The daily schedule is served over WebSocket when
-    the card asks for it, grouped by hour to keep the payload small, and never stored as a
-    state.
--   **Offline data is embedded.** The stop index and the timetables are generated from the
-    Nantes Métropole GTFS feed and refreshed monthly by a scheduled workflow. Timetables live
-    in a compressed SQLite database, so only the stops you follow are ever read into memory.
--   **The card is a plain Web Component**, served by the integration itself and isolated in a
-    shadow root.
+- **One request for the whole network.** A single SIRI `StopMonitoring` call returns every
+  monitored stop, so watching ten stops costs no more than watching one. The bike feed works
+  the same way: one GBFS poll serves every station, which is also what makes the
+  "nearby stations" list free.
+- **Timetables stay out of the database.** The daily schedule is served over WebSocket when
+  the card asks for it, grouped by hour, and never stored as a state. The stop index and the
+  timetables are generated from the Nantes Métropole GTFS feed and refreshed monthly by a
+  scheduled workflow, then shipped as a compressed SQLite database.
+- **The cards are plain Web Components**, served by the integration itself and isolated in a
+  shadow root.
 
 ## Data sources
 
 Live departures come from the **Naolib / Okina SIRI** public endpoint, stops and timetables
-from the **Nantes Métropole** open data GTFS feed. This project is not affiliated with
-Semitan, Nantes Métropole or Okina.
+from the **Nantes Métropole** open data GTFS feed, and the bike stations from the **Naolib
+GBFS 3.0** feed operated by JCDecaux, referenced on
+[transport.data.gouv.fr](https://transport.data.gouv.fr/datasets/offre-et-temps-reel-du-service-velos-en-libre-service-naolib-de-nantes-metropole-au-format-gbfs).
 
 ## Development
 
 The card sources live in `src/` and are bundled into `custom_components/naolib/www/` by
-esbuild; the generated bundles are committed, so rebuild them before opening a pull request:
+esbuild; the generated bundles are committed, so rebuild them before opening a pull request.
+The integration targets the **silver** quality scale, which requires the Python modules to
+stay fully covered. The test suite needs Python 3.13.2 or newer.
 
 ```bash
 npm ci && npm run check   # eslint + vitest + build
 pip install ruff -r requirements_test.txt
-ruff check . && ruff format --check . && pytest
+ruff check . && ruff format --check . && pytest --cov=custom_components/naolib
 ```
 
-The integration targets the **silver** quality scale, which requires the Python modules to
-stay fully covered:
+A Compose file ships both runners if you would rather not install the toolchains — any other
+command can be passed through, and dependencies are cached in named volumes:
 
 ```bash
-pytest --cov=custom_components/naolib --cov-report=term-missing
+docker compose run --rm python   # ruff check + ruff format --check + pytest
+docker compose run --rm node     # eslint + vitest + build
 ```
-
-The test suite runs against the Home Assistant package, which requires Python 3.13.2 or
-newer.
 
 ## Contributing
 

@@ -1,5 +1,5 @@
 import { normalizeConfig, prepareDepartures } from "./config.js";
-import { NaolibCardEditor } from "./editor.js";
+import { findEntity, isDepartureEntity } from "./entities.js";
 import { esc } from "./html.js";
 import { renderDepartures } from "./render/departures.js";
 import { renderTimetable, renderTimetableHeader } from "./render/timetable.js";
@@ -18,18 +18,8 @@ import {
 
 // Detect a Naolib sensor by its attributes rather than its entity_id,
 // so the card keeps working even if the entity is renamed.
-function isNaolibEntity(state) {
-    return (
-        !!state &&
-        state.attributes.stop_code !== undefined &&
-        Array.isArray(state.attributes.next_departures)
-    );
-}
-
 function findNaolibEntity(hass) {
-    return Object.keys(hass.states).find((entityId) =>
-        isNaolibEntity(hass.states[entityId]),
-    );
+    return findEntity(hass, isDepartureEntity);
 }
 
 class NaolibCard extends HTMLElement {
@@ -384,25 +374,4 @@ class NaolibCard extends HTMLElement {
     }
 }
 
-// The loader retries with a fresh query string, so this module can be
-// evaluated more than once per page: a second definition is not an error.
-function define(tag, elementClass) {
-    try {
-        customElements.define(tag, elementClass);
-    } catch (err) {
-        if (!customElements.get(tag)) throw err;
-    }
-}
-
-define("naolib-card", NaolibCard);
-define("naolib-card-editor", NaolibCardEditor);
-
-window.customCards = window.customCards || [];
-if (!window.customCards.some((card) => card.type === "naolib-card")) {
-    window.customCards.push({
-        type: "naolib-card",
-        name: "Naolib Nantes",
-        preview: true,
-        description: "Affiche les prochains départs (Bus/Tram) pour un arrêt donné.",
-    });
-}
+export { NaolibCard };
