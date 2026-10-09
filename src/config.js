@@ -1,5 +1,6 @@
 import { MS_PER_MINUTE, STALE_SECONDS } from "./constants.js";
 import { humanizeSeconds } from "./time.js";
+import { configValidator } from "./validate.js";
 
 export const DEFAULT_CONFIG = {
     entity: "",
@@ -15,54 +16,34 @@ export const DEFAULT_CONFIG = {
 export const MAX_LINES_LIMIT = 30;
 export const MAX_WALK_TIME = 60;
 
-function invalid(message) {
-    // Lovelace surfaces this message in the card editor.
-    throw new Error(`naolib-card: ${message}`);
-}
-
-function asInteger(value, name, min, max) {
-    const number = Number(value);
-    if (!Number.isInteger(number) || number < min || number > max) {
-        invalid(`"${name}" doit être un entier entre ${min} et ${max}`);
-    }
-    return number;
-}
-
-function asBoolean(value, name) {
-    if (typeof value !== "boolean") invalid(`"${name}" doit être vrai ou faux`);
-    return value;
-}
+const check = configValidator("naolib-card");
 
 // Normalize and validate a user-provided card configuration. Anything the
 // renderer reads afterwards is guaranteed to have the right type.
 export function normalizeConfig(config) {
-    if (config && typeof config !== "object") invalid("configuration invalide");
-    const raw = { ...DEFAULT_CONFIG, ...(config || {}) };
-
-    if (typeof raw.entity !== "string") invalid('"entity" doit être une entité');
-    if (typeof raw.title !== "string") invalid('"title" doit être du texte');
+    const raw = check.base(config, DEFAULT_CONFIG);
 
     let lines = raw.lines;
     if (lines === null || lines === undefined) lines = [];
     if (typeof lines === "string" || typeof lines === "number") lines = [lines];
-    if (!Array.isArray(lines)) invalid('"lines" doit être une liste de lignes');
+    if (!Array.isArray(lines)) check.invalid('"lines" doit être une liste de lignes');
 
     return {
         ...raw,
         lines: lines.map((line) => String(line)),
-        direction: asInteger(raw.direction ?? 0, "direction", 0, 2),
-        walk_time: asInteger(raw.walk_time ?? 0, "walk_time", 0, MAX_WALK_TIME),
-        max_lines: asInteger(
+        direction: check.integer(raw.direction ?? 0, "direction", 0, 2),
+        walk_time: check.integer(raw.walk_time ?? 0, "walk_time", 0, MAX_WALK_TIME),
+        max_lines: check.integer(
             raw.max_lines ?? DEFAULT_CONFIG.max_lines,
             "max_lines",
             1,
             MAX_LINES_LIMIT,
         ),
-        show_timetable_button: asBoolean(
+        show_timetable_button: check.boolean(
             raw.show_timetable_button,
             "show_timetable_button",
         ),
-        compact: asBoolean(raw.compact, "compact"),
+        compact: check.boolean(raw.compact, "compact"),
     };
 }
 

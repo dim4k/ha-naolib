@@ -1,6 +1,6 @@
 """The Naolib integration for Home Assistant."""
 
-from datetime import timedelta
+from datetime import date, timedelta
 import logging
 from typing import Any
 
@@ -292,28 +292,37 @@ async def _async_update_listener(hass: HomeAssistant, entry: NaolibConfigEntry) 
 async def handle_get_data(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    """Handle get data command."""
-    stop_code = msg["stop_code"]
-    coordinator = hass.data[DOMAIN].coordinator
-    stop = coordinator.stop_by_code(stop_code)
+    """Return the full timetable of a configured stop for one day.
 
-    if stop is None:
+    The departures themselves are not sent: the card reads them from the
+    sensor attributes.
+    """
+    stop_code = msg["stop_code"]
+    if hass.data[DOMAIN].coordinator.stop_by_code(stop_code) is None:
         connection.send_error(
             msg["id"], "stop_not_found", f"Stop code {stop_code} not found"
         )
         return
 
-    payload = build_stop_data(coordinator.data or {}, stop)
     day = dt_util.now().date() + timedelta(days=msg["day_offset"])
-    payload["schedules"] = await hass.async_add_executor_job(
-        build_timetable, stop_code, day
+    schedules, end = await hass.async_add_executor_job(_timetable, stop_code, day)
+    connection.send_result(
+        msg["id"],
+        {
+            "schedules": schedules,
+            "schedules_date": day.isoformat(),
+            # The timetables ship with the integration: once the calendar runs
+            # out, every day is empty and only an update brings them back.
+            "schedules_expired": end is not None and day > end,
+        },
     )
-    payload["schedules_date"] = day.isoformat()
-    # The timetables ship with the integration: once the calendar runs out,
-    # every day is empty and only an update brings them back.
-    end = await hass.async_add_executor_job(calendar_end)
-    payload["schedules_expired"] = end is not None and day > end
-    connection.send_result(msg["id"], payload)
+
+
+def _timetable(
+    stop_code: str, day: date
+) -> tuple[dict[str, dict[str, Any]], date | None]:
+    """Read a day's timetable and the end of the calendar in one executor job."""
+    return build_timetable(stop_code, day), calendar_end()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bool:

@@ -14,11 +14,11 @@ from custom_components.naolib.bike import (
     _async_get_json,
     async_fetch_stations,
     build_station_data,
-    nearby_stations,
     parse_stations,
     parse_status,
 )
 from custom_components.naolib.const import GBFS_STATION_INFORMATION_URL
+from custom_components.naolib.stops import nearest
 
 _INFORMATION = {
     "data": {
@@ -189,11 +189,11 @@ def test_parse_status_normalizes_an_epoch_timestamp() -> None:
     assert parse_status(payload)["1"]["last_reported"].startswith("2025-")
 
 
-def test_nearby_stations_are_sorted_by_distance() -> None:
+def test_nearest_stations_are_sorted_by_distance() -> None:
     """The closest station comes first, with its distance in meters."""
     stations = parse_stations(_INFORMATION)
 
-    result = nearby_stations(stations, 47.2143, -1.5595)
+    result = nearest(stations, 47.2143, -1.5595)
 
     assert [station["id"] for station in result] == ["2", "1", "3"]
     assert result[0]["distance"] == 0
@@ -396,8 +396,6 @@ async def test_coordinator_uses_the_shortest_interval(hass: HomeAssistant) -> No
     coordinator.register_station("a", NaolibBikeStation(id="1", name="A", interval=120))
     coordinator.register_station("b", NaolibBikeStation(id="2", name="B", interval=30))
     assert coordinator.update_interval.total_seconds() == 30
-    assert coordinator.station_by_id("2").name == "B"
 
     coordinator.unregister_station("b")
     assert coordinator.update_interval.total_seconds() == 120
-    assert coordinator.station_by_id("2") is None

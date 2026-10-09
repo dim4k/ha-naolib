@@ -1,10 +1,10 @@
+import { NaolibBaseCard } from "./base-card.js";
 import { normalizeConfig, prepareDepartures } from "./config.js";
-import { findEntity, isDepartureEntity } from "./entities.js";
+import { isDepartureEntity } from "./entities.js";
 import { esc } from "./html.js";
 import { renderDepartures } from "./render/departures.js";
 import { renderTimetable, renderTimetableHeader } from "./render/timetable.js";
 import { message } from "./render/shared.js";
-import { styles } from "./styles/index.js";
 import {
     ATTR_DAY,
     ATTR_DIRECTION,
@@ -16,16 +16,18 @@ import {
     TICK_MS,
 } from "./constants.js";
 
-// Detect a Naolib sensor by its attributes rather than its entity_id,
-// so the card keeps working even if the entity is renamed.
-function findNaolibEntity(hass) {
-    return findEntity(hass, isDepartureEntity);
-}
-
-class NaolibCard extends HTMLElement {
-    // `hass` can be set before `setConfig` (mobile reconnections), so the card
-    // always carries a usable configuration.
-    config = normalizeConfig({});
+class NaolibCard extends NaolibBaseCard {
+    // A Naolib sensor is detected by its attributes rather than its
+    // entity_id, so the card keeps working even if the entity is renamed.
+    static normalizeConfig = normalizeConfig;
+    static acceptsEntity = isDepartureEntity;
+    static idAttribute = "stop_code";
+    static labelAttribute = "stop_label";
+    static icon = "mdi:bus-clock";
+    static defaultTitle = "Arrêt Naolib";
+    static noEntityMessage =
+        "Aucune entité Naolib trouvée. Ajoutez l'intégration via Paramètres &gt; Appareils et services.";
+    static logLabel = "Naolib card";
 
     // Timetable view state, kept in memory only: the selected line, the
     // direction remembered for each line and the day being browsed.
@@ -39,21 +41,8 @@ class NaolibCard extends HTMLElement {
     // Days past the end of the embedded calendar.
     _expiredDays = new Set();
 
-    static getStubConfig(hass) {
-        return { entity: findNaolibEntity(hass) || "" };
-    }
-
     static getConfigElement() {
         return document.createElement("naolib-card-editor");
-    }
-
-    setConfig(config) {
-        this.config = normalizeConfig(config);
-        this.toggleAttribute("compact", this.config.compact);
-        // Options change what is rendered without the entity state changing,
-        // so drop the memoized state to force a redraw.
-        this._state = null;
-        if (this.content && this._hass) this._updateFromHass(this._hass);
     }
 
     connectedCallback() {
@@ -77,31 +66,6 @@ class NaolibCard extends HTMLElement {
             clearInterval(this._ticker);
             this._ticker = null;
         }
-    }
-
-    set hass(hass) {
-        // Keep a reference for the on-demand timetable WebSocket call.
-        this._hass = hass;
-        try {
-            this._updateFromHass(hass);
-        } catch (err) {
-            // Never let an exception bubble up to Home Assistant, otherwise
-            // the whole card is replaced by a generic "Configuration error".
-            // This happens often on mobile where `hass` may be set before
-            // `setConfig`, or during frequent reconnections.
-            console.error("Naolib card error:", err);
-            try {
-                if (!this.content) this._initShadowDom();
-                this._message(`Erreur : ${esc(err?.message || err)}`);
-            } catch (renderErr) {
-                // The fallback rendering must not throw either.
-                console.error("Naolib card: cannot render error state", renderErr);
-            }
-        }
-    }
-
-    _message(html) {
-        this.content.innerHTML = message(html);
     }
 
     // Replacing innerHTML wholesale loses the scroll position of the timetable
@@ -150,62 +114,16 @@ class NaolibCard extends HTMLElement {
         this._dayOffset = 0;
     }
 
-    _updateFromHass(hass) {
-        if (!hass) return;
-
-        const config = this.config;
-        const entityId = config.entity || findNaolibEntity(hass);
-
-        if (!this.content) this._initShadowDom();
-        if (!entityId) {
-            this._message(
-                `Aucune entité Naolib trouvée. Ajoutez l'intégration via Paramètres &gt; Appareils et services.`,
-            );
-            return;
-        }
-
-        const state = hass.states[entityId];
-        if (!state || !state.attributes) {
-            this._message(`Entité introuvable : ${esc(entityId)}`);
-            return;
-        }
-
-        // A different stop invalidates the cached timetable and any selection
-        // made against it.
+    // A different stop invalidates the cached timetable and any selection
+    // made against it.
+    _onStateChange(previous, state) {
         if (
-            this._state &&
-            (this._state.entity_id !== entityId ||
-                this._state.attributes.stop_code !== state.attributes.stop_code)
+            previous &&
+            (previous.entity_id !== state.entity_id ||
+                previous.attributes.stop_code !== state.attributes.stop_code)
         ) {
             this._resetScheduleState();
         }
-
-        // Nothing to redraw while the sensor has not been updated.
-        if (
-            this._state &&
-            this._state.last_updated === state.last_updated &&
-            this._state.entity_id === entityId
-        ) {
-            return;
-        }
-
-        this._state = state;
-        this._updateTitle(
-            config.title ||
-                state.attributes.stop_label ||
-                state.attributes.friendly_name,
-        );
-
-        if (!state.attributes.stop_code) {
-            this._message("Entité non configurée (stop_code manquant)");
-            return;
-        }
-
-        // Departures are rendered straight from the sensor attributes:
-        // no WebSocket round-trip, so the card displays instantly and
-        // survives flaky mobile connections. The WebSocket is only used
-        // for the full timetable, on demand (see _fetchSchedules).
-        this._render();
     }
 
     _fetchSchedules(dayOffset) {
@@ -245,22 +163,7 @@ class NaolibCard extends HTMLElement {
     }
 
     _initShadowDom() {
-        // attachShadow throws if a root is already attached, which happens
-        // when a previous call failed after attaching but before filling it.
-        if (!this.shadowRoot) this.attachShadow({ mode: "open" });
-        this.shadowRoot.innerHTML = `
-            <style>${styles}</style>
-            <ha-card>
-                <div class="card-header">
-                    <ha-icon icon="mdi:bus-clock" class="icon"></ha-icon>
-                    <span id="title">Arrêt Naolib</span>
-                </div>
-                <div id="content"></div>
-            </ha-card>
-        `;
-        this.content = this.shadowRoot.getElementById("content");
-        this.titleElement = this.shadowRoot.getElementById("title");
-
+        super._initShadowDom();
         this.content.addEventListener("click", (ev) => {
             try {
                 this._handleClick(ev);
@@ -325,10 +228,6 @@ class NaolibCard extends HTMLElement {
         }
     }
 
-    _updateTitle(name) {
-        if (this.titleElement) this.titleElement.innerText = name || "Arrêt Naolib";
-    }
-
     _render() {
         if (!this._state) {
             this._message("Chargement...");
@@ -369,13 +268,6 @@ class NaolibCard extends HTMLElement {
             this.config,
         );
         return 2 + Math.ceil(departures.length / (this.config.compact ? 1 : 2));
-    }
-
-    // Sizing for the sections view: the rendered height depends on how many
-    // line/destination groups the feed returns and doubles when the timetable
-    // is open, so only the card itself can measure it.
-    getGridOptions() {
-        return { columns: 12, min_columns: 6, rows: "auto" };
     }
 }
 

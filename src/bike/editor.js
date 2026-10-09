@@ -4,6 +4,7 @@ import {
     MAX_NEARBY_RADIUS,
 } from "./config.js";
 import { isBikeEntity, matchingEntities } from "../entities.js";
+import { NaolibFormEditor } from "../form-editor.js";
 
 const LABELS = {
     entity: "Entité (station vélo Naolib)",
@@ -69,59 +70,12 @@ function buildSchema(hass, config) {
     ];
 }
 
-// Keep the stored configuration to what the user actually changed, so the
-// YAML editor stays readable.
-function prune(config) {
-    const out = {};
-    for (const [key, value] of Object.entries(config)) {
-        if (key in DEFAULT_BIKE_CONFIG) {
-            if (JSON.stringify(value) === JSON.stringify(DEFAULT_BIKE_CONFIG[key])) {
-                continue;
-            }
-        }
-        out[key] = value;
-    }
-    return out;
-}
+export class NaolibBikeCardEditor extends NaolibFormEditor {
+    static defaults = DEFAULT_BIKE_CONFIG;
+    static labels = LABELS;
+    static helpers = HELPERS;
 
-export class NaolibBikeCardEditor extends HTMLElement {
-    setConfig(config) {
-        this._config = { ...DEFAULT_BIKE_CONFIG, ...(config || {}) };
-        this._render();
-    }
-
-    set hass(hass) {
-        this._hass = hass;
-        this._render();
-    }
-
-    _render() {
-        if (!this._hass || !this._config) return;
-
-        if (!this._form) {
-            this._form = document.createElement("ha-form");
-            this._form.computeLabel = (schema) => LABELS[schema.name] || schema.name;
-            this._form.computeHelper = (schema) => HELPERS[schema.name] || "";
-            this._form.addEventListener("value-changed", (ev) =>
-                this._valueChanged(ev),
-            );
-            this.appendChild(this._form);
-        }
-
-        this._form.hass = this._hass;
-        this._form.schema = buildSchema(this._hass, this._config);
-        this._form.data = this._config;
-    }
-
-    _valueChanged(ev) {
-        ev.stopPropagation();
-        this._config = { ...this._config, ...ev.detail.value };
-        this.dispatchEvent(
-            new CustomEvent("config-changed", {
-                detail: { config: prune(this._config) },
-                bubbles: true,
-                composed: true,
-            }),
-        );
+    buildSchema(hass, config) {
+        return buildSchema(hass, config);
     }
 }

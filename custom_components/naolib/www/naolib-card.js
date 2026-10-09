@@ -5,6 +5,322 @@ var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
+// src/entities.js
+function isDepartureEntity(state) {
+  return !!state && state.attributes.stop_code !== void 0 && Array.isArray(state.attributes.next_departures);
+}
+function isBikeEntity(state) {
+  return !!state && state.attributes.station_id !== void 0 && Array.isArray(state.attributes.nearby_stations);
+}
+function findEntity(hass, predicate) {
+  return Object.keys(hass.states).find(
+    (entityId) => predicate(hass.states[entityId])
+  );
+}
+function matchingEntities(hass, predicate, current) {
+  const ids = Object.keys(hass.states).filter(
+    (entityId) => predicate(hass.states[entityId])
+  );
+  if (current && !ids.includes(current)) ids.push(current);
+  return ids;
+}
+
+// src/html.js
+function esc(value) {
+  return String(value ?? "").replace(
+    /[&<>"']/g,
+    (c) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    })[c]
+  );
+}
+
+// src/render/shared.js
+function message(html) {
+  return `<div class="no-bus">${html}</div>`;
+}
+
+// src/styles/base.js
+var base = `
+    :host {
+        font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif);
+        --naolib-radius: 10px;
+        --naolib-urgent: #e74c3c;
+        --naolib-warning: #f1c40f;
+        --naolib-early: #27ae60;
+        --naolib-neutral: rgba(127, 127, 127, 0.1);
+        --naolib-neutral-strong: rgba(127, 127, 127, 0.18);
+        --naolib-scroll-thumb: rgba(127, 127, 127, 0.35);
+        --naolib-scroll-thumb-hover: rgba(127, 127, 127, 0.55);
+    }
+    ha-card { padding-bottom: 0; overflow: hidden; }
+    .card-header { padding: 16px; font-weight: bold; font-size: 1.2em; display: flex; align-items: center; }
+    .icon { margin-right: 10px; color: var(--primary-color); }
+    .badge { font-weight: bold; padding: 4px 8px; border-radius: 6px; min-width: 25px; text-align: center; margin-right: 12px; font-size: 1.1em; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+    .no-bus { padding: 10px 16px; font-style: italic; color: var(--secondary-text-color); text-align: center; }
+    .time { font-weight: bold; font-size: 1.1em; padding: 4px 8px; border-radius: 4px; white-space: nowrap; background: var(--naolib-neutral); color: var(--primary-text-color); }
+    .urgent { background-color: rgba(231, 76, 60, 0.2); color: var(--naolib-urgent); }
+    .warning { background-color: rgba(241, 196, 15, 0.2); color: var(--naolib-warning); }
+    .button { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: var(--primary-color); font-weight: 500; padding: 6px 12px; border-radius: 4px; transition: background 0.2s; background: none; border: none; font-family: inherit; font-size: inherit; }
+    .button:hover { background-color: rgba(var(--rgb-primary-color), 0.1); }
+    .button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+    .button ha-icon { margin-right: 6px; --mdc-icon-size: 18px; }
+    .icon-button { cursor: pointer; background: none; border: none; padding: 0; margin-right: 10px; color: var(--primary-color); display: inline-flex; }
+    .icon-button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+    .card-footer { padding: 8px 16px; text-align: center; border-top: 1px solid var(--divider-color); }
+    :host([compact]) .card-header { padding: 12px 16px 4px; font-size: 1.05em; }
+    :host([compact]) .badge { font-size: 0.95em; padding: 2px 6px; margin-right: 8px; }
+    :host([compact]) .time { font-size: 1em; }
+`;
+
+// src/styles/bike.js
+var bike = `
+    .bike-main { padding: 4px 16px 16px; }
+    .bike-counters { display: flex; gap: 12px; }
+    .bike-counter { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 8px; border-radius: var(--naolib-radius); background: var(--naolib-neutral); }
+    .bike-counter ha-icon { color: var(--primary-color); --mdc-icon-size: 22px; }
+    .bike-count { font-size: 2em; font-weight: bold; line-height: 1.1; color: var(--primary-text-color); }
+    .bike-count.low { color: var(--naolib-warning); }
+    .bike-count.empty { color: var(--naolib-urgent); }
+    .bike-label { font-size: 0.8em; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.5px; }
+    .bike-gauge { margin-top: 12px; height: 6px; border-radius: 3px; background: var(--naolib-neutral-strong); overflow: hidden; }
+    .bike-gauge-fill { height: 100%; background: var(--primary-color); transition: width 0.3s; }
+    .bike-status { margin-top: 10px; padding: 6px 10px; border-radius: 6px; text-align: center; font-size: 0.85em; font-weight: 500; background: rgba(231, 76, 60, 0.15); color: var(--naolib-urgent); }
+    .bike-nearby { border-top: 1px solid var(--divider-color); padding: 8px 16px 12px; }
+    .bike-nearby-title { font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--secondary-text-color); margin-bottom: 4px; }
+    .bike-nearby-row { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; }
+    .bike-nearby-row + .bike-nearby-row { border-top: 1px solid var(--naolib-neutral); }
+    .bike-nearby-row.closed { opacity: 0.5; }
+    .bike-nearby-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bike-nearby-distance { font-size: 0.8em; color: var(--secondary-text-color); white-space: nowrap; }
+    .bike-nearby-bikes, .bike-nearby-docks { font-weight: bold; white-space: nowrap; min-width: 56px; text-align: right; }
+    .bike-nearby-bikes span, .bike-nearby-docks span { font-weight: normal; font-size: 0.75em; color: var(--secondary-text-color); }
+    :host([compact]) .bike-main { padding: 0 12px 12px; }
+    :host([compact]) .bike-counter { padding: 8px 6px; }
+    :host([compact]) .bike-count { font-size: 1.5em; }
+`;
+
+// src/styles/departures.js
+var departures = `
+    /* minmax(0, 1fr): without it the implicit column is sized on the widest
+       tile, so a long destination next to two clocks pushes the rows past the
+       card, which clips them. */
+    .tiles { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 16px; }
+    .tiles + .tiles { padding-top: 0; }
+    .tile-group { font-size: 0.68em; font-weight: 500; text-transform: uppercase; letter-spacing: 0.9px; color: var(--secondary-text-color); }
+    .tile { display: flex; flex-direction: column; gap: 6px; background: var(--naolib-neutral); border-radius: var(--naolib-radius); padding: 10px 12px; }
+    .tile-row { display: flex; align-items: center; gap: 10px; }
+    .tile .badge { margin-right: 0; }
+    .tile-text { flex: 1; min-width: 0; }
+    .tile-mode { font-size: 0.72em; color: var(--secondary-text-color); }
+    .dest { font-size: 1.1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .times-container { display: flex; align-items: baseline; gap: 10px; margin-left: auto; }
+    /* Strip under the departure: the clocks the countdown stands for, and the
+       markers. Its tint carries the state so a delay reads without parsing. */
+    .strip { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border-radius: 6px; background: var(--naolib-neutral-strong); font-size: 0.88em; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }
+    .strip.late { background: rgba(231, 76, 60, 0.16); }
+    .strip.final { background: rgba(127, 127, 127, 0.26); }
+    .clock { white-space: nowrap; }
+    .clock.strong { font-weight: 700; color: var(--primary-text-color); }
+    .clock.aimed { margin-right: 4px; text-decoration: line-through; opacity: 0.65; }
+    .clock.late { color: var(--naolib-urgent); font-weight: 700; }
+    .clock.early { color: var(--naolib-early); font-weight: 700; }
+    .mark { font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+    :host([compact]) .tiles { gap: 6px; padding: 8px 16px; }
+    :host([compact]) .tile { padding: 6px 10px; }
+    :host([compact]) .strip { font-size: 0.8em; padding: 3px 8px; }
+    :host([compact]) .mark { font-size: 0.8em; color: var(--secondary-text-color); }
+`;
+
+// src/styles/timetable.js
+var timetable = `
+    .schedule-header { padding-bottom: 10px; margin-bottom: 12px; gap: 8px; flex-wrap: wrap; }
+    .tt-title { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .schedule-header .tt-chips { flex: 1 1 auto; min-width: 0; justify-content: flex-end; }
+
+    .tt-section { padding: 0 16px; margin-bottom: 16px; }
+    .tt-section:last-child { margin-bottom: 0; padding-bottom: 16px; }
+    /* The separators frame the "next passage" banner, as in the mock-up. */
+    .tt-dir-section { padding-bottom: 12px; margin-bottom: 0; border-bottom: 1px solid var(--divider-color); }
+    .tt-next-section { padding: 10px 16px; margin-bottom: 14px; border-bottom: 1px solid var(--divider-color); }
+    .tt-label { font-size: 0.68em; font-weight: 500; text-transform: uppercase; letter-spacing: 0.9px; color: var(--secondary-text-color); margin-bottom: 6px; }
+
+    .tt-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tt-chip { display: inline-flex; flex: 0 0 auto; cursor: pointer; background: none; border: none; padding: 3px; border-radius: var(--naolib-radius); opacity: 0.5; filter: grayscale(0.55); transition: opacity 0.15s, filter 0.15s; }
+    .tt-chip .badge { margin-right: 0; }
+    .tt-chip:hover { opacity: 0.85; filter: none; }
+    /* Inset ring rather than an outline: it stays inside the button box, so it
+       is never clipped when compact mode shrinks the badge. */
+    .tt-chip.selected { opacity: 1; filter: none; box-shadow: inset 0 0 0 2px var(--primary-color); }
+    .tt-chip:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
+
+    .tt-to { display: flex; align-items: center; gap: 10px; background: rgba(var(--rgb-primary-color), 0.1); border: 1px solid rgba(var(--rgb-primary-color), 0.35); border-radius: var(--naolib-radius); padding: 8px 10px; }
+    .tt-to-arrow { color: var(--primary-color); --mdc-icon-size: 20px; flex: none; }
+    .tt-to-text { flex: 1; min-width: 0; }
+    .tt-to-text .tt-label { margin-bottom: 0; }
+    .tt-to-name { font-weight: 600; color: var(--primary-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tt-swap { display: inline-flex; align-items: center; gap: 4px; max-width: 45%; cursor: pointer; border: none; background: none; padding: 5px 6px; border-radius: 8px; font-family: inherit; font-size: 0.78em; color: var(--secondary-text-color); transition: background 0.15s, color 0.15s; }
+    .tt-swap span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tt-swap ha-icon { --mdc-icon-size: 16px; flex: none; }
+    .tt-swap:hover { background: rgba(var(--rgb-primary-color), 0.12); color: var(--primary-color); }
+    .tt-swap:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+
+    .tt-next { display: flex; align-items: baseline; gap: 8px; }
+    .tt-next .tt-label { margin-bottom: 0; }
+    .tt-next-time { font-size: 1.25em; font-weight: 700; color: var(--primary-color); font-variant-numeric: tabular-nums; }
+    .tt-next-rel { font-size: 0.85em; color: var(--secondary-text-color); }
+
+    .tt-day-section { margin-bottom: 12px; }
+    .tt-day { display: flex; align-items: center; gap: 8px; background: var(--naolib-neutral); border-radius: var(--naolib-radius); padding: 4px; }
+    .tt-day-nav { display: inline-flex; cursor: pointer; border: none; background: none; color: var(--primary-color); border-radius: 8px; padding: 5px; transition: background 0.15s; }
+    .tt-day-nav:hover:not([disabled]) { background: rgba(var(--rgb-primary-color), 0.12); }
+    .tt-day-nav[disabled] { color: var(--secondary-text-color); opacity: 0.4; cursor: default; }
+    .tt-day-nav:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+    .tt-day-text { flex: 1; min-width: 0; text-align: center; }
+    .tt-day-date { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tt-day-rel { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.6px; color: var(--secondary-text-color); }
+
+    /* Both syntaxes on purpose: Chromium 121+ and Firefox honour the standard
+       properties, older Chromium falls back to the -webkit- pseudo-elements. */
+    /* The negative margin compensates the padding, which keeps the grid aligned
+       with the other sections while leaving room for the "now" ring and the
+       last row at full scroll. */
+    .tt-hours { max-height: 380px; overflow-y: auto; overscroll-behavior: contain; position: relative; margin: 0 -4px; padding: 4px 12px 6px 4px; scrollbar-width: thin; scrollbar-color: var(--naolib-scroll-thumb) transparent; }
+    .tt-hours::-webkit-scrollbar { width: 8px; }
+    .tt-hours::-webkit-scrollbar-track { background: transparent; }
+    .tt-hours::-webkit-scrollbar-thumb { background: var(--naolib-scroll-thumb); border: 2px solid transparent; background-clip: content-box; border-radius: 4px; }
+    .tt-hours::-webkit-scrollbar-thumb:hover { background: var(--naolib-scroll-thumb-hover); background-clip: content-box; }
+    .tt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px; }
+    .tt-cell { background: var(--naolib-neutral); border: 1px solid transparent; border-radius: var(--naolib-radius); padding: 6px 8px 8px; }
+    .tt-cell.past { opacity: 0.42; }
+    /* Inset ring rather than an outer glow: it stays inside the cell box, so
+       the scroll container never clips it. */
+    .tt-cell.now { background: rgba(var(--rgb-primary-color), 0.1); border-color: var(--primary-color); box-shadow: inset 0 0 0 2px rgba(var(--rgb-primary-color), 0.25); }
+    .tt-cell-hour { font-size: 1.05em; font-weight: 700; color: var(--primary-color); font-variant-numeric: tabular-nums; padding-bottom: 4px; margin-bottom: 4px; border-bottom: 1px solid rgba(var(--rgb-primary-color), 0.2); }
+    .tt-cell-hour small { font-size: 0.7em; font-weight: 400; opacity: 0.7; }
+    .tt-mins { display: flex; flex-wrap: wrap; gap: 2px 6px; }
+    .tt-min { min-width: 1.5em; text-align: center; font-size: 0.9em; font-variant-numeric: tabular-nums; color: var(--primary-text-color); }
+    .tt-min.past { color: var(--secondary-text-color); opacity: 0.55; }
+    .tt-min.next { background: var(--primary-color); color: #fff; font-weight: 700; border-radius: 5px; padding: 0 3px; margin: 0 -3px; }
+
+    :host([compact]) .tt-hours { max-height: 260px; }
+    :host([compact]) .tt-cell { padding: 4px 6px 6px; }
+    :host([compact]) .tt-min { font-size: 0.85em; }
+`;
+
+// src/styles/index.js
+var styles = [base, departures, timetable, bike].join("\n");
+
+// src/base-card.js
+var NaolibBaseCard = class extends HTMLElement {
+  constructor() {
+    super(...arguments);
+    // `hass` can be set before `setConfig` (mobile reconnections), so the card
+    // always carries a usable configuration.
+    __publicField(this, "config", this.constructor.normalizeConfig({}));
+  }
+  static getStubConfig(hass) {
+    return { entity: findEntity(hass, this.acceptsEntity) || "" };
+  }
+  setConfig(config) {
+    this.config = this.constructor.normalizeConfig(config);
+    this.toggleAttribute("compact", this.config.compact);
+    this._state = null;
+    if (this.content && this._hass) this._updateFromHass(this._hass);
+  }
+  set hass(hass) {
+    this._hass = hass;
+    try {
+      this._updateFromHass(hass);
+    } catch (err) {
+      console.error(`${this.constructor.logLabel} error:`, err);
+      try {
+        if (!this.content) this._initShadowDom();
+        this._message(`Erreur : ${esc(err?.message || err)}`);
+      } catch (renderErr) {
+        console.error(
+          `${this.constructor.logLabel}: cannot render error state`,
+          renderErr
+        );
+      }
+    }
+  }
+  _message(html) {
+    this.content.innerHTML = message(html);
+  }
+  // Called before a new state is adopted, with the one it replaces.
+  _onStateChange(_previous, _state) {
+  }
+  _updateFromHass(hass) {
+    if (!hass) return;
+    const card = this.constructor;
+    const entityId = this.config.entity || findEntity(hass, card.acceptsEntity);
+    if (!this.content) this._initShadowDom();
+    if (!entityId) {
+      this._message(card.noEntityMessage);
+      return;
+    }
+    const state = hass.states[entityId];
+    if (!state || !state.attributes) {
+      this._message(`Entité introuvable : ${esc(entityId)}`);
+      return;
+    }
+    if (this._state && this._state.last_updated === state.last_updated && this._state.entity_id === entityId) {
+      return;
+    }
+    this._onStateChange(this._state, state);
+    this._state = state;
+    this._updateTitle(
+      this.config.title || state.attributes[card.labelAttribute] || state.attributes.friendly_name
+    );
+    if (!state.attributes[card.idAttribute]) {
+      this._message(`Entité non configurée (${card.idAttribute} manquant)`);
+      return;
+    }
+    this._render();
+  }
+  _initShadowDom() {
+    const card = this.constructor;
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    this.shadowRoot.innerHTML = `
+            <style>${styles}</style>
+            <ha-card>
+                <div class="card-header">
+                    <ha-icon icon="${card.icon}" class="icon"></ha-icon>
+                    <span id="title">${esc(card.defaultTitle)}</span>
+                </div>
+                <div id="content"></div>
+            </ha-card>
+        `;
+    this.content = this.shadowRoot.getElementById("content");
+    this.titleElement = this.shadowRoot.getElementById("title");
+  }
+  _updateTitle(name) {
+    if (this.titleElement) {
+      this.titleElement.innerText = name || this.constructor.defaultTitle;
+    }
+  }
+  // Sizing for the sections view: the rendered height depends on the data
+  // and on the options, so only the card itself can measure it.
+  getGridOptions() {
+    return { columns: 12, min_columns: 6, rows: "auto" };
+  }
+};
+__publicField(NaolibBaseCard, "normalizeConfig", (config) => config);
+// Predicate recognising the sensors this card can render.
+__publicField(NaolibBaseCard, "acceptsEntity", () => false);
+// Attributes holding the configured identifier and its display label.
+__publicField(NaolibBaseCard, "idAttribute", "");
+__publicField(NaolibBaseCard, "labelAttribute", "");
+__publicField(NaolibBaseCard, "icon", "");
+__publicField(NaolibBaseCard, "defaultTitle", "");
+__publicField(NaolibBaseCard, "noEntityMessage", "");
+__publicField(NaolibBaseCard, "logLabel", "Naolib card");
+
 // src/constants.js
 var ID_SCHEDULE_BTN = "schedule-btn";
 var ID_BACK_BTN = "back-btn";
@@ -61,6 +377,35 @@ function passageDate(now, hour, minute) {
   return date;
 }
 
+// src/validate.js
+function configValidator(cardType) {
+  function invalid(message2) {
+    throw new Error(`${cardType}: ${message2}`);
+  }
+  return {
+    invalid,
+    integer(value, name, min, max) {
+      const number = Number(value);
+      if (!Number.isInteger(number) || number < min || number > max) {
+        invalid(`"${name}" doit être un entier entre ${min} et ${max}`);
+      }
+      return number;
+    },
+    boolean(value, name) {
+      if (typeof value !== "boolean") invalid(`"${name}" doit être vrai ou faux`);
+      return value;
+    },
+    // Merge the defaults and check the options every card has.
+    base(config, defaults) {
+      if (config && typeof config !== "object") invalid("configuration invalide");
+      const raw = { ...defaults, ...config || {} };
+      if (typeof raw.entity !== "string") invalid('"entity" doit être une entité');
+      if (typeof raw.title !== "string") invalid('"title" doit être du texte');
+      return raw;
+    }
+  };
+}
+
 // src/config.js
 var DEFAULT_CONFIG = {
   entity: "",
@@ -77,45 +422,29 @@ var DEFAULT_CONFIG = {
 };
 var MAX_LINES_LIMIT = 30;
 var MAX_WALK_TIME = 60;
-function invalid(message2) {
-  throw new Error(`naolib-card: ${message2}`);
-}
-function asInteger(value, name, min, max) {
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < min || number > max) {
-    invalid(`"${name}" doit être un entier entre ${min} et ${max}`);
-  }
-  return number;
-}
-function asBoolean(value, name) {
-  if (typeof value !== "boolean") invalid(`"${name}" doit être vrai ou faux`);
-  return value;
-}
+var check = configValidator("naolib-card");
 function normalizeConfig(config) {
-  if (config && typeof config !== "object") invalid("configuration invalide");
-  const raw = { ...DEFAULT_CONFIG, ...config || {} };
-  if (typeof raw.entity !== "string") invalid('"entity" doit être une entité');
-  if (typeof raw.title !== "string") invalid('"title" doit être du texte');
+  const raw = check.base(config, DEFAULT_CONFIG);
   let lines = raw.lines;
   if (lines === null || lines === void 0) lines = [];
   if (typeof lines === "string" || typeof lines === "number") lines = [lines];
-  if (!Array.isArray(lines)) invalid('"lines" doit être une liste de lignes');
+  if (!Array.isArray(lines)) check.invalid('"lines" doit être une liste de lignes');
   return {
     ...raw,
     lines: lines.map((line) => String(line)),
-    direction: asInteger(raw.direction ?? 0, "direction", 0, 2),
-    walk_time: asInteger(raw.walk_time ?? 0, "walk_time", 0, MAX_WALK_TIME),
-    max_lines: asInteger(
+    direction: check.integer(raw.direction ?? 0, "direction", 0, 2),
+    walk_time: check.integer(raw.walk_time ?? 0, "walk_time", 0, MAX_WALK_TIME),
+    max_lines: check.integer(
       raw.max_lines ?? DEFAULT_CONFIG.max_lines,
       "max_lines",
       1,
       MAX_LINES_LIMIT
     ),
-    show_timetable_button: asBoolean(
+    show_timetable_button: check.boolean(
       raw.show_timetable_button,
       "show_timetable_button"
     ),
-    compact: asBoolean(raw.compact, "compact")
+    compact: check.boolean(raw.compact, "compact")
   };
 }
 function matchesFilters(line, direction, config) {
@@ -145,40 +474,6 @@ function prepareDepartures(departures2, config, now = Date.now()) {
     if (config.compact && out.length >= config.max_lines) break;
   }
   return out;
-}
-
-// src/entities.js
-function isDepartureEntity(state) {
-  return !!state && state.attributes.stop_code !== void 0 && Array.isArray(state.attributes.next_departures);
-}
-function isBikeEntity(state) {
-  return !!state && state.attributes.station_id !== void 0 && Array.isArray(state.attributes.nearby_stations);
-}
-function findEntity(hass, predicate) {
-  return Object.keys(hass.states).find(
-    (entityId) => predicate(hass.states[entityId])
-  );
-}
-function matchingEntities(hass, predicate, current) {
-  const ids = Object.keys(hass.states).filter(
-    (entityId) => predicate(hass.states[entityId])
-  );
-  if (current && !ids.includes(current)) ids.push(current);
-  return ids;
-}
-
-// src/html.js
-function esc(value) {
-  return String(value ?? "").replace(
-    /[&<>"']/g,
-    (c) => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;"
-    })[c]
-  );
 }
 
 // src/lines.js
@@ -267,10 +562,7 @@ function modeLabel(type) {
   return MODE_LABELS[type] || "Bus";
 }
 
-// src/render/shared.js
-function message(html) {
-  return `<div class="no-bus">${html}</div>`;
-}
+// src/render/departures.js
 function timeClass(minutes) {
   if (minutes <= URGENT_MINUTES) return "time urgent";
   if (minutes <= WARNING_MINUTES) return "time warning";
@@ -284,7 +576,7 @@ function clocksHtml(item) {
   if (typeof delay !== "number" || Math.abs(delay) < DELAY_TOLERANCE_MINUTES) {
     return `<span class="clock strong">${real}</span>`;
   }
-  const aimed = formatClock(new Date(expected - delay * 6e4));
+  const aimed = formatClock(new Date(expected - delay * MS_PER_MINUTE));
   const state = delay > 0 ? "late" : "early";
   const title = delay > 0 ? `${delay} min de retard sur l'horaire théorique` : `${-delay} min d'avance sur l'horaire théorique`;
   return `<span class="clock aimed">${aimed}</span><span class="clock strong ${state}" title="${title}">${real}</span>`;
@@ -292,8 +584,6 @@ function clocksHtml(item) {
 function isLate(item) {
   return typeof item.delay_minutes === "number" && item.delay_minutes >= DELAY_TOLERANCE_MINUTES;
 }
-
-// src/render/departures.js
 function tileRow(departure, timesHtml) {
   return `
         <div class="tile-row">
@@ -589,187 +879,10 @@ function renderTimetable({
   ].join("");
 }
 
-// src/styles/base.js
-var base = `
-    :host {
-        font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif);
-        --naolib-radius: 10px;
-        --naolib-urgent: #e74c3c;
-        --naolib-warning: #f1c40f;
-        --naolib-early: #27ae60;
-        --naolib-neutral: rgba(127, 127, 127, 0.1);
-        --naolib-neutral-strong: rgba(127, 127, 127, 0.18);
-        --naolib-scroll-thumb: rgba(127, 127, 127, 0.35);
-        --naolib-scroll-thumb-hover: rgba(127, 127, 127, 0.55);
-    }
-    ha-card { padding-bottom: 0; overflow: hidden; }
-    .card-header { padding: 16px; font-weight: bold; font-size: 1.2em; display: flex; align-items: center; }
-    .icon { margin-right: 10px; color: var(--primary-color); }
-    .badge { font-weight: bold; padding: 4px 8px; border-radius: 6px; min-width: 25px; text-align: center; margin-right: 12px; font-size: 1.1em; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
-    .no-bus { padding: 10px 16px; font-style: italic; color: var(--secondary-text-color); text-align: center; }
-    .time { font-weight: bold; font-size: 1.1em; padding: 4px 8px; border-radius: 4px; white-space: nowrap; background: var(--naolib-neutral); color: var(--primary-text-color); }
-    .urgent { background-color: rgba(231, 76, 60, 0.2); color: var(--naolib-urgent); }
-    .warning { background-color: rgba(241, 196, 15, 0.2); color: var(--naolib-warning); }
-    .button { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: var(--primary-color); font-weight: 500; padding: 6px 12px; border-radius: 4px; transition: background 0.2s; background: none; border: none; font-family: inherit; font-size: inherit; }
-    .button:hover { background-color: rgba(var(--rgb-primary-color), 0.1); }
-    .button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
-    .button ha-icon { margin-right: 6px; --mdc-icon-size: 18px; }
-    .icon-button { cursor: pointer; background: none; border: none; padding: 0; margin-right: 10px; color: var(--primary-color); display: inline-flex; }
-    .icon-button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
-    .card-footer { padding: 8px 16px; text-align: center; border-top: 1px solid var(--divider-color); }
-    :host([compact]) .card-header { padding: 12px 16px 4px; font-size: 1.05em; }
-    :host([compact]) .badge { font-size: 0.95em; padding: 2px 6px; margin-right: 8px; }
-    :host([compact]) .time { font-size: 1em; }
-`;
-
-// src/styles/bike.js
-var bike = `
-    .bike-main { padding: 4px 16px 16px; }
-    .bike-counters { display: flex; gap: 12px; }
-    .bike-counter { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 8px; border-radius: var(--naolib-radius); background: var(--naolib-neutral); }
-    .bike-counter ha-icon { color: var(--primary-color); --mdc-icon-size: 22px; }
-    .bike-count { font-size: 2em; font-weight: bold; line-height: 1.1; color: var(--primary-text-color); }
-    .bike-count.low { color: var(--naolib-warning); }
-    .bike-count.empty { color: var(--naolib-urgent); }
-    .bike-label { font-size: 0.8em; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.5px; }
-    .bike-gauge { margin-top: 12px; height: 6px; border-radius: 3px; background: var(--naolib-neutral-strong); overflow: hidden; }
-    .bike-gauge-fill { height: 100%; background: var(--primary-color); transition: width 0.3s; }
-    .bike-status { margin-top: 10px; padding: 6px 10px; border-radius: 6px; text-align: center; font-size: 0.85em; font-weight: 500; background: rgba(231, 76, 60, 0.15); color: var(--naolib-urgent); }
-    .bike-nearby { border-top: 1px solid var(--divider-color); padding: 8px 16px 12px; }
-    .bike-nearby-title { font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--secondary-text-color); margin-bottom: 4px; }
-    .bike-nearby-row { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; }
-    .bike-nearby-row + .bike-nearby-row { border-top: 1px solid var(--naolib-neutral); }
-    .bike-nearby-row.closed { opacity: 0.5; }
-    .bike-nearby-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .bike-nearby-distance { font-size: 0.8em; color: var(--secondary-text-color); white-space: nowrap; }
-    .bike-nearby-bikes, .bike-nearby-docks { font-weight: bold; white-space: nowrap; min-width: 56px; text-align: right; }
-    .bike-nearby-bikes span, .bike-nearby-docks span { font-weight: normal; font-size: 0.75em; color: var(--secondary-text-color); }
-    :host([compact]) .bike-main { padding: 0 12px 12px; }
-    :host([compact]) .bike-counter { padding: 8px 6px; }
-    :host([compact]) .bike-count { font-size: 1.5em; }
-`;
-
-// src/styles/departures.js
-var departures = `
-    /* minmax(0, 1fr): without it the implicit column is sized on the widest
-       tile, so a long destination next to two clocks pushes the rows past the
-       card, which clips them. */
-    .tiles { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 16px; }
-    .tiles + .tiles { padding-top: 0; }
-    .tile-group { font-size: 0.68em; font-weight: 500; text-transform: uppercase; letter-spacing: 0.9px; color: var(--secondary-text-color); }
-    .tile { display: flex; flex-direction: column; gap: 6px; background: var(--naolib-neutral); border-radius: var(--naolib-radius); padding: 10px 12px; }
-    .tile-row { display: flex; align-items: center; gap: 10px; }
-    .tile .badge { margin-right: 0; }
-    .tile-text { flex: 1; min-width: 0; }
-    .tile-mode { font-size: 0.72em; color: var(--secondary-text-color); }
-    .dest { font-size: 1.1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .times-container { display: flex; align-items: baseline; gap: 10px; margin-left: auto; }
-    /* Strip under the departure: the clocks the countdown stands for, and the
-       markers. Its tint carries the state so a delay reads without parsing. */
-    .strip { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border-radius: 6px; background: var(--naolib-neutral-strong); font-size: 0.88em; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }
-    .strip.late { background: rgba(231, 76, 60, 0.16); }
-    .strip.final { background: rgba(127, 127, 127, 0.26); }
-    .clock { white-space: nowrap; }
-    .clock.strong { font-weight: 700; color: var(--primary-text-color); }
-    .clock.aimed { margin-right: 4px; text-decoration: line-through; opacity: 0.65; }
-    .clock.late { color: var(--naolib-urgent); font-weight: 700; }
-    .clock.early { color: var(--naolib-early); font-weight: 700; }
-    .mark { font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
-    :host([compact]) .tiles { gap: 6px; padding: 8px 16px; }
-    :host([compact]) .tile { padding: 6px 10px; }
-    :host([compact]) .strip { font-size: 0.8em; padding: 3px 8px; }
-    :host([compact]) .mark { font-size: 0.8em; color: var(--secondary-text-color); }
-`;
-
-// src/styles/timetable.js
-var timetable = `
-    .schedule-header { padding-bottom: 10px; margin-bottom: 12px; gap: 8px; flex-wrap: wrap; }
-    .tt-title { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .schedule-header .tt-chips { flex: 1 1 auto; min-width: 0; justify-content: flex-end; }
-
-    .tt-section { padding: 0 16px; margin-bottom: 16px; }
-    .tt-section:last-child { margin-bottom: 0; padding-bottom: 16px; }
-    /* The separators frame the "next passage" banner, as in the mock-up. */
-    .tt-dir-section { padding-bottom: 12px; margin-bottom: 0; border-bottom: 1px solid var(--divider-color); }
-    .tt-next-section { padding: 10px 16px; margin-bottom: 14px; border-bottom: 1px solid var(--divider-color); }
-    .tt-label { font-size: 0.68em; font-weight: 500; text-transform: uppercase; letter-spacing: 0.9px; color: var(--secondary-text-color); margin-bottom: 6px; }
-
-    .tt-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-    .tt-chip { display: inline-flex; flex: 0 0 auto; cursor: pointer; background: none; border: none; padding: 3px; border-radius: var(--naolib-radius); opacity: 0.5; filter: grayscale(0.55); transition: opacity 0.15s, filter 0.15s; }
-    .tt-chip .badge { margin-right: 0; }
-    .tt-chip:hover { opacity: 0.85; filter: none; }
-    /* Inset ring rather than an outline: it stays inside the button box, so it
-       is never clipped when compact mode shrinks the badge. */
-    .tt-chip.selected { opacity: 1; filter: none; box-shadow: inset 0 0 0 2px var(--primary-color); }
-    .tt-chip:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
-
-    .tt-to { display: flex; align-items: center; gap: 10px; background: rgba(var(--rgb-primary-color), 0.1); border: 1px solid rgba(var(--rgb-primary-color), 0.35); border-radius: var(--naolib-radius); padding: 8px 10px; }
-    .tt-to-arrow { color: var(--primary-color); --mdc-icon-size: 20px; flex: none; }
-    .tt-to-text { flex: 1; min-width: 0; }
-    .tt-to-text .tt-label { margin-bottom: 0; }
-    .tt-to-name { font-weight: 600; color: var(--primary-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .tt-swap { display: inline-flex; align-items: center; gap: 4px; max-width: 45%; cursor: pointer; border: none; background: none; padding: 5px 6px; border-radius: 8px; font-family: inherit; font-size: 0.78em; color: var(--secondary-text-color); transition: background 0.15s, color 0.15s; }
-    .tt-swap span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .tt-swap ha-icon { --mdc-icon-size: 16px; flex: none; }
-    .tt-swap:hover { background: rgba(var(--rgb-primary-color), 0.12); color: var(--primary-color); }
-    .tt-swap:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
-
-    .tt-next { display: flex; align-items: baseline; gap: 8px; }
-    .tt-next .tt-label { margin-bottom: 0; }
-    .tt-next-time { font-size: 1.25em; font-weight: 700; color: var(--primary-color); font-variant-numeric: tabular-nums; }
-    .tt-next-rel { font-size: 0.85em; color: var(--secondary-text-color); }
-
-    .tt-day-section { margin-bottom: 12px; }
-    .tt-day { display: flex; align-items: center; gap: 8px; background: var(--naolib-neutral); border-radius: var(--naolib-radius); padding: 4px; }
-    .tt-day-nav { display: inline-flex; cursor: pointer; border: none; background: none; color: var(--primary-color); border-radius: 8px; padding: 5px; transition: background 0.15s; }
-    .tt-day-nav:hover:not([disabled]) { background: rgba(var(--rgb-primary-color), 0.12); }
-    .tt-day-nav[disabled] { color: var(--secondary-text-color); opacity: 0.4; cursor: default; }
-    .tt-day-nav:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
-    .tt-day-text { flex: 1; min-width: 0; text-align: center; }
-    .tt-day-date { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .tt-day-rel { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.6px; color: var(--secondary-text-color); }
-
-    /* Both syntaxes on purpose: Chromium 121+ and Firefox honour the standard
-       properties, older Chromium falls back to the -webkit- pseudo-elements. */
-    /* The negative margin compensates the padding, which keeps the grid aligned
-       with the other sections while leaving room for the "now" ring and the
-       last row at full scroll. */
-    .tt-hours { max-height: 380px; overflow-y: auto; overscroll-behavior: contain; position: relative; margin: 0 -4px; padding: 4px 12px 6px 4px; scrollbar-width: thin; scrollbar-color: var(--naolib-scroll-thumb) transparent; }
-    .tt-hours::-webkit-scrollbar { width: 8px; }
-    .tt-hours::-webkit-scrollbar-track { background: transparent; }
-    .tt-hours::-webkit-scrollbar-thumb { background: var(--naolib-scroll-thumb); border: 2px solid transparent; background-clip: content-box; border-radius: 4px; }
-    .tt-hours::-webkit-scrollbar-thumb:hover { background: var(--naolib-scroll-thumb-hover); background-clip: content-box; }
-    .tt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px; }
-    .tt-cell { background: var(--naolib-neutral); border: 1px solid transparent; border-radius: var(--naolib-radius); padding: 6px 8px 8px; }
-    .tt-cell.past { opacity: 0.42; }
-    /* Inset ring rather than an outer glow: it stays inside the cell box, so
-       the scroll container never clips it. */
-    .tt-cell.now { background: rgba(var(--rgb-primary-color), 0.1); border-color: var(--primary-color); box-shadow: inset 0 0 0 2px rgba(var(--rgb-primary-color), 0.25); }
-    .tt-cell-hour { font-size: 1.05em; font-weight: 700; color: var(--primary-color); font-variant-numeric: tabular-nums; padding-bottom: 4px; margin-bottom: 4px; border-bottom: 1px solid rgba(var(--rgb-primary-color), 0.2); }
-    .tt-cell-hour small { font-size: 0.7em; font-weight: 400; opacity: 0.7; }
-    .tt-mins { display: flex; flex-wrap: wrap; gap: 2px 6px; }
-    .tt-min { min-width: 1.5em; text-align: center; font-size: 0.9em; font-variant-numeric: tabular-nums; color: var(--primary-text-color); }
-    .tt-min.past { color: var(--secondary-text-color); opacity: 0.55; }
-    .tt-min.next { background: var(--primary-color); color: #fff; font-weight: 700; border-radius: 5px; padding: 0 3px; margin: 0 -3px; }
-
-    :host([compact]) .tt-hours { max-height: 260px; }
-    :host([compact]) .tt-cell { padding: 4px 6px 6px; }
-    :host([compact]) .tt-min { font-size: 0.85em; }
-`;
-
-// src/styles/index.js
-var styles = [base, departures, timetable, bike].join("\n");
-
 // src/card.js
-function findNaolibEntity(hass) {
-  return findEntity(hass, isDepartureEntity);
-}
-var NaolibCard = class extends HTMLElement {
+var NaolibCard = class extends NaolibBaseCard {
   constructor() {
     super(...arguments);
-    // `hass` can be set before `setConfig` (mobile reconnections), so the card
-    // always carries a usable configuration.
-    __publicField(this, "config", normalizeConfig({}));
     // Timetable view state, kept in memory only: the selected line, the
     // direction remembered for each line and the day being browsed.
     __publicField(this, "_selectedLine", null);
@@ -782,17 +895,8 @@ var NaolibCard = class extends HTMLElement {
     // Days past the end of the embedded calendar.
     __publicField(this, "_expiredDays", /* @__PURE__ */ new Set());
   }
-  static getStubConfig(hass) {
-    return { entity: findNaolibEntity(hass) || "" };
-  }
   static getConfigElement() {
     return document.createElement("naolib-card-editor");
-  }
-  setConfig(config) {
-    this.config = normalizeConfig(config);
-    this.toggleAttribute("compact", this.config.compact);
-    this._state = null;
-    if (this.content && this._hass) this._updateFromHass(this._hass);
   }
   connectedCallback() {
     if (this._ticker) return;
@@ -810,23 +914,6 @@ var NaolibCard = class extends HTMLElement {
       clearInterval(this._ticker);
       this._ticker = null;
     }
-  }
-  set hass(hass) {
-    this._hass = hass;
-    try {
-      this._updateFromHass(hass);
-    } catch (err) {
-      console.error("Naolib card error:", err);
-      try {
-        if (!this.content) this._initShadowDom();
-        this._message(`Erreur : ${esc(err?.message || err)}`);
-      } catch (renderErr) {
-        console.error("Naolib card: cannot render error state", renderErr);
-      }
-    }
-  }
-  _message(html) {
-    this.content.innerHTML = message(html);
   }
   // Replacing innerHTML wholesale loses the scroll position of the timetable
   // containers, which the 20 s ticker would then reset on every pass.
@@ -865,37 +952,12 @@ var NaolibCard = class extends HTMLElement {
     this._directionByLine = /* @__PURE__ */ new Map();
     this._dayOffset = 0;
   }
-  _updateFromHass(hass) {
-    if (!hass) return;
-    const config = this.config;
-    const entityId = config.entity || findNaolibEntity(hass);
-    if (!this.content) this._initShadowDom();
-    if (!entityId) {
-      this._message(
-        `Aucune entité Naolib trouvée. Ajoutez l'intégration via Paramètres &gt; Appareils et services.`
-      );
-      return;
-    }
-    const state = hass.states[entityId];
-    if (!state || !state.attributes) {
-      this._message(`Entité introuvable : ${esc(entityId)}`);
-      return;
-    }
-    if (this._state && (this._state.entity_id !== entityId || this._state.attributes.stop_code !== state.attributes.stop_code)) {
+  // A different stop invalidates the cached timetable and any selection
+  // made against it.
+  _onStateChange(previous, state) {
+    if (previous && (previous.entity_id !== state.entity_id || previous.attributes.stop_code !== state.attributes.stop_code)) {
       this._resetScheduleState();
     }
-    if (this._state && this._state.last_updated === state.last_updated && this._state.entity_id === entityId) {
-      return;
-    }
-    this._state = state;
-    this._updateTitle(
-      config.title || state.attributes.stop_label || state.attributes.friendly_name
-    );
-    if (!state.attributes.stop_code) {
-      this._message("Entité non configurée (stop_code manquant)");
-      return;
-    }
-    this._render();
   }
   _fetchSchedules(dayOffset) {
     if (!this._hass || !this._state) return;
@@ -926,19 +988,7 @@ var NaolibCard = class extends HTMLElement {
     });
   }
   _initShadowDom() {
-    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
-    this.shadowRoot.innerHTML = `
-            <style>${styles}</style>
-            <ha-card>
-                <div class="card-header">
-                    <ha-icon icon="mdi:bus-clock" class="icon"></ha-icon>
-                    <span id="title">Arrêt Naolib</span>
-                </div>
-                <div id="content"></div>
-            </ha-card>
-        `;
-    this.content = this.shadowRoot.getElementById("content");
-    this.titleElement = this.shadowRoot.getElementById("title");
+    super._initShadowDom();
     this.content.addEventListener("click", (ev) => {
       try {
         this._handleClick(ev);
@@ -992,9 +1042,6 @@ var NaolibCard = class extends HTMLElement {
       this._render();
     }
   }
-  _updateTitle(name) {
-    if (this.titleElement) this.titleElement.innerText = name || "Arrêt Naolib";
-  }
   _render() {
     if (!this._state) {
       this._message("Chargement...");
@@ -1031,13 +1078,17 @@ var NaolibCard = class extends HTMLElement {
     );
     return 2 + Math.ceil(departures2.length / (this.config.compact ? 1 : 2));
   }
-  // Sizing for the sections view: the rendered height depends on how many
-  // line/destination groups the feed returns and doubles when the timetable
-  // is open, so only the card itself can measure it.
-  getGridOptions() {
-    return { columns: 12, min_columns: 6, rows: "auto" };
-  }
 };
+// A Naolib sensor is detected by its attributes rather than its
+// entity_id, so the card keeps working even if the entity is renamed.
+__publicField(NaolibCard, "normalizeConfig", normalizeConfig);
+__publicField(NaolibCard, "acceptsEntity", isDepartureEntity);
+__publicField(NaolibCard, "idAttribute", "stop_code");
+__publicField(NaolibCard, "labelAttribute", "stop_label");
+__publicField(NaolibCard, "icon", "mdi:bus-clock");
+__publicField(NaolibCard, "defaultTitle", "Arrêt Naolib");
+__publicField(NaolibCard, "noEntityMessage", "Aucune entité Naolib trouvée. Ajoutez l'intégration via Paramètres &gt; Appareils et services.");
+__publicField(NaolibCard, "logLabel", "Naolib card");
 
 // src/bike/config.js
 var DEFAULT_BIKE_CONFIG = {
@@ -1052,41 +1103,25 @@ var DEFAULT_BIKE_CONFIG = {
 };
 var MAX_NEARBY_COUNT = 10;
 var MAX_NEARBY_RADIUS = 1e3;
-function invalid2(message2) {
-  throw new Error(`naolib-bike-card: ${message2}`);
-}
-function asInteger2(value, name, min, max) {
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < min || number > max) {
-    invalid2(`"${name}" doit être un entier entre ${min} et ${max}`);
-  }
-  return number;
-}
-function asBoolean2(value, name) {
-  if (typeof value !== "boolean") invalid2(`"${name}" doit être vrai ou faux`);
-  return value;
-}
+var check2 = configValidator("naolib-bike-card");
 function normalizeBikeConfig(config) {
-  if (config && typeof config !== "object") invalid2("configuration invalide");
-  const raw = { ...DEFAULT_BIKE_CONFIG, ...config || {} };
-  if (typeof raw.entity !== "string") invalid2('"entity" doit être une entité');
-  if (typeof raw.title !== "string") invalid2('"title" doit être du texte');
+  const raw = check2.base(config, DEFAULT_BIKE_CONFIG);
   return {
     ...raw,
-    nearby_count: asInteger2(
+    nearby_count: check2.integer(
       raw.nearby_count ?? DEFAULT_BIKE_CONFIG.nearby_count,
       "nearby_count",
       0,
       MAX_NEARBY_COUNT
     ),
-    nearby_radius: asInteger2(
+    nearby_radius: check2.integer(
       raw.nearby_radius ?? DEFAULT_BIKE_CONFIG.nearby_radius,
       "nearby_radius",
       0,
       MAX_NEARBY_RADIUS
     ),
-    show_docks: asBoolean2(raw.show_docks, "show_docks"),
-    compact: asBoolean2(raw.compact, "compact")
+    show_docks: check2.boolean(raw.show_docks, "show_docks"),
+    compact: check2.boolean(raw.compact, "compact")
   };
 }
 function prepareNearby(stations, config) {
@@ -1184,96 +1219,9 @@ function renderBikeStation(data, nearby, config) {
 }
 
 // src/bike/card.js
-function findBikeEntity(hass) {
-  return findEntity(hass, isBikeEntity);
-}
-var NaolibBikeCard = class extends HTMLElement {
-  constructor() {
-    super(...arguments);
-    // `hass` can be set before `setConfig` (mobile reconnections), so the card
-    // always carries a usable configuration.
-    __publicField(this, "config", normalizeBikeConfig({}));
-  }
-  static getStubConfig(hass) {
-    return { entity: findBikeEntity(hass) || "" };
-  }
+var NaolibBikeCard = class extends NaolibBaseCard {
   static getConfigElement() {
     return document.createElement("naolib-bike-card-editor");
-  }
-  setConfig(config) {
-    this.config = normalizeBikeConfig(config);
-    this.toggleAttribute("compact", this.config.compact);
-    this._state = null;
-    if (this.content && this._hass) this._updateFromHass(this._hass);
-  }
-  set hass(hass) {
-    this._hass = hass;
-    try {
-      this._updateFromHass(hass);
-    } catch (err) {
-      console.error("Naolib bike card error:", err);
-      try {
-        if (!this.content) this._initShadowDom();
-        this._message(`Erreur : ${esc(err?.message || err)}`);
-      } catch (renderErr) {
-        console.error(
-          "Naolib bike card: cannot render error state",
-          renderErr
-        );
-      }
-    }
-  }
-  _message(html) {
-    this.content.innerHTML = message(html);
-  }
-  _updateFromHass(hass) {
-    if (!hass) return;
-    const config = this.config;
-    const entityId = config.entity || findBikeEntity(hass);
-    if (!this.content) this._initShadowDom();
-    if (!entityId) {
-      this._message(
-        `Aucune station vélo Naolib trouvée. Ajoutez-la via Paramètres &gt; Appareils et services.`
-      );
-      return;
-    }
-    const state = hass.states[entityId];
-    if (!state || !state.attributes) {
-      this._message(`Entité introuvable : ${esc(entityId)}`);
-      return;
-    }
-    if (this._state && this._state.last_updated === state.last_updated && this._state.entity_id === entityId) {
-      return;
-    }
-    this._state = state;
-    this._updateTitle(
-      config.title || state.attributes.station_label || state.attributes.friendly_name
-    );
-    if (!state.attributes.station_id) {
-      this._message("Entité non configurée (station_id manquant)");
-      return;
-    }
-    this._render();
-  }
-  _initShadowDom() {
-    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
-    this.shadowRoot.innerHTML = `
-            <style>${styles}</style>
-            <ha-card>
-                <div class="card-header">
-                    <ha-icon icon="mdi:bike" class="icon"></ha-icon>
-                    <span id="title">Station vélo Naolib</span>
-                </div>
-                <div id="content"></div>
-            </ha-card>
-        `;
-    this.content = this.shadowRoot.getElementById("content");
-    this.titleElement = this.shadowRoot.getElementById("title");
-  }
-  _updateTitle(name) {
-    if (this.titleElement) {
-      this.titleElement.innerText = name || "Station vélo Naolib";
-    }
   }
   // The sensor attributes carry everything the card shows, so the whole
   // station and its neighbours render without any WebSocket round-trip.
@@ -1307,12 +1255,81 @@ var NaolibBikeCard = class extends HTMLElement {
     );
     return 3 + nearby.length;
   }
-  // Sizing for the sections view: the height depends on how many
-  // neighbouring stations the config asks for, so only the card can measure it.
-  getGridOptions() {
-    return { columns: 12, min_columns: 6, rows: "auto" };
+};
+__publicField(NaolibBikeCard, "normalizeConfig", normalizeBikeConfig);
+__publicField(NaolibBikeCard, "acceptsEntity", isBikeEntity);
+__publicField(NaolibBikeCard, "idAttribute", "station_id");
+__publicField(NaolibBikeCard, "labelAttribute", "station_label");
+__publicField(NaolibBikeCard, "icon", "mdi:bike");
+__publicField(NaolibBikeCard, "defaultTitle", "Station vélo Naolib");
+__publicField(NaolibBikeCard, "noEntityMessage", "Aucune station vélo Naolib trouvée. Ajoutez-la via Paramètres &gt; Appareils et services.");
+__publicField(NaolibBikeCard, "logLabel", "Naolib bike card");
+
+// src/form-editor.js
+var NaolibFormEditor = class extends HTMLElement {
+  buildSchema(_hass, _config) {
+    return [];
+  }
+  // Hooks for the options whose form value differs from the stored one.
+  toFormData(config) {
+    return config;
+  }
+  fromFormData(config, value) {
+    return { ...config, ...value };
+  }
+  setConfig(config) {
+    this._config = { ...this.constructor.defaults, ...config || {} };
+    this._render();
+  }
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+  _render() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      const { labels, helpers } = this.constructor;
+      this._form = document.createElement("ha-form");
+      this._form.computeLabel = (schema) => labels[schema.name] || schema.name;
+      this._form.computeHelper = (schema) => helpers[schema.name] || "";
+      this._form.addEventListener(
+        "value-changed",
+        (ev) => this._valueChanged(ev)
+      );
+      this.appendChild(this._form);
+    }
+    this._form.hass = this._hass;
+    this._form.schema = this.buildSchema(this._hass, this._config);
+    this._form.data = this.toFormData(this._config);
+  }
+  _valueChanged(ev) {
+    ev.stopPropagation();
+    this._config = this.fromFormData(this._config, ev.detail.value);
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: this._prune(this._config) },
+        bubbles: true,
+        composed: true
+      })
+    );
+  }
+  // Keep the stored configuration to what the user actually changed, so the
+  // YAML editor stays readable.
+  _prune(config) {
+    const defaults = this.constructor.defaults;
+    const out = {};
+    for (const [key, value] of Object.entries(config)) {
+      if (key in defaults && JSON.stringify(value) === JSON.stringify(defaults[key])) {
+        continue;
+      }
+      out[key] = value;
+    }
+    return out;
   }
 };
+__publicField(NaolibFormEditor, "defaults", {});
+__publicField(NaolibFormEditor, "labels", {});
+__publicField(NaolibFormEditor, "helpers", {});
 
 // src/bike/editor.js
 var LABELS = {
@@ -1374,55 +1391,14 @@ function buildSchema(hass, config) {
     }
   ];
 }
-function prune(config) {
-  const out = {};
-  for (const [key, value] of Object.entries(config)) {
-    if (key in DEFAULT_BIKE_CONFIG) {
-      if (JSON.stringify(value) === JSON.stringify(DEFAULT_BIKE_CONFIG[key])) {
-        continue;
-      }
-    }
-    out[key] = value;
-  }
-  return out;
-}
-var NaolibBikeCardEditor = class extends HTMLElement {
-  setConfig(config) {
-    this._config = { ...DEFAULT_BIKE_CONFIG, ...config || {} };
-    this._render();
-  }
-  set hass(hass) {
-    this._hass = hass;
-    this._render();
-  }
-  _render() {
-    if (!this._hass || !this._config) return;
-    if (!this._form) {
-      this._form = document.createElement("ha-form");
-      this._form.computeLabel = (schema) => LABELS[schema.name] || schema.name;
-      this._form.computeHelper = (schema) => HELPERS[schema.name] || "";
-      this._form.addEventListener(
-        "value-changed",
-        (ev) => this._valueChanged(ev)
-      );
-      this.appendChild(this._form);
-    }
-    this._form.hass = this._hass;
-    this._form.schema = buildSchema(this._hass, this._config);
-    this._form.data = this._config;
-  }
-  _valueChanged(ev) {
-    ev.stopPropagation();
-    this._config = { ...this._config, ...ev.detail.value };
-    this.dispatchEvent(
-      new CustomEvent("config-changed", {
-        detail: { config: prune(this._config) },
-        bubbles: true,
-        composed: true
-      })
-    );
+var NaolibBikeCardEditor = class extends NaolibFormEditor {
+  buildSchema(hass, config) {
+    return buildSchema(hass, config);
   }
 };
+__publicField(NaolibBikeCardEditor, "defaults", DEFAULT_BIKE_CONFIG);
+__publicField(NaolibBikeCardEditor, "labels", LABELS);
+__publicField(NaolibBikeCardEditor, "helpers", HELPERS);
 
 // src/editor.js
 var LABELS2 = {
@@ -1520,58 +1496,21 @@ function buildSchema2(hass, config) {
     }
   ];
 }
-function prune2(config) {
-  const out = {};
-  for (const [key, value] of Object.entries(config)) {
-    if (key in DEFAULT_CONFIG) {
-      if (JSON.stringify(value) === JSON.stringify(DEFAULT_CONFIG[key])) continue;
-    }
-    out[key] = value;
+var NaolibCardEditor = class extends NaolibFormEditor {
+  buildSchema(hass, config) {
+    return buildSchema2(hass, config);
   }
-  return out;
-}
-var NaolibCardEditor = class extends HTMLElement {
-  setConfig(config) {
-    this._config = { ...DEFAULT_CONFIG, ...config || {} };
-    this._render();
+  // The direction selector works with strings, the config with numbers.
+  toFormData(config) {
+    return { ...config, direction: String(config.direction) };
   }
-  set hass(hass) {
-    this._hass = hass;
-    this._render();
-  }
-  _render() {
-    if (!this._hass || !this._config) return;
-    if (!this._form) {
-      this._form = document.createElement("ha-form");
-      this._form.computeLabel = (schema) => LABELS2[schema.name] || schema.name;
-      this._form.computeHelper = (schema) => HELPERS2[schema.name] || "";
-      this._form.addEventListener(
-        "value-changed",
-        (ev) => this._valueChanged(ev)
-      );
-      this.appendChild(this._form);
-    }
-    this._form.hass = this._hass;
-    this._form.schema = buildSchema2(this._hass, this._config);
-    this._form.data = { ...this._config, direction: String(this._config.direction) };
-  }
-  _valueChanged(ev) {
-    ev.stopPropagation();
-    const value = ev.detail.value;
-    this._config = {
-      ...this._config,
-      ...value,
-      direction: Number(value.direction ?? 0)
-    };
-    this.dispatchEvent(
-      new CustomEvent("config-changed", {
-        detail: { config: prune2(this._config) },
-        bubbles: true,
-        composed: true
-      })
-    );
+  fromFormData(config, value) {
+    return { ...config, ...value, direction: Number(value.direction ?? 0) };
   }
 };
+__publicField(NaolibCardEditor, "defaults", DEFAULT_CONFIG);
+__publicField(NaolibCardEditor, "labels", LABELS2);
+__publicField(NaolibCardEditor, "helpers", HELPERS2);
 
 // src/index.js
 function define(tag, elementClass) {

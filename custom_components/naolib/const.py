@@ -73,8 +73,5 @@ CALENDAR_FILE: str = "data/calendar.json"
 # How far ahead the card may ask for a timetable, in days.
 MAX_TIMETABLE_DAY_OFFSET: int = 6
 
-# Number of stops proposed when searching around a location.
-NEARBY_STOPS_LIMIT: int = 15
-
-# Number of bike stations proposed when searching around a location.
-NEARBY_STATIONS_LIMIT: int = 15
+# Number of stops or bike stations proposed when searching around a location.
+NEARBY_LIMIT: int = 15

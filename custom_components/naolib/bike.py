@@ -31,7 +31,6 @@ from .const import (
     GBFS_INFO_TTL,
     GBFS_STATION_INFORMATION_URL,
     GBFS_STATION_STATUS_URL,
-    NEARBY_STATIONS_LIMIT,
 )
 from .stops import haversine
 
@@ -196,24 +195,6 @@ async def async_fetch_stations(
     return parse_stations(payload)
 
 
-def nearby_stations(
-    stations: list[dict[str, Any]],
-    lat: float,
-    lon: float,
-    limit: int = NEARBY_STATIONS_LIMIT,
-) -> list[dict[str, Any]]:
-    """Return the closest stations to a location, with their distance."""
-    scored = [
-        {
-            **station,
-            "distance": round(haversine(lat, lon, station["lat"], station["lon"])),
-        }
-        for station in stations
-    ]
-    scored.sort(key=lambda station: station["distance"])
-    return scored[:limit]
-
-
 class NaolibBikeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     """Poll the whole bike network and index stations by id."""
 
@@ -243,13 +224,6 @@ class NaolibBikeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Stop serving a configured station."""
         self.stations.pop(entry_id, None)
         self._apply_interval()
-
-    def station_by_id(self, station_id: str) -> NaolibBikeStation | None:
-        """Return the configured station with this id, if any."""
-        return next(
-            (station for station in self.stations.values() if station.id == station_id),
-            None,
-        )
 
     def _apply_interval(self) -> None:
         """Use the shortest requested interval across all stations."""

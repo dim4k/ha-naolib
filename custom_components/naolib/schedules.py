@@ -73,6 +73,27 @@ def load_station_timetable(station_id: str) -> dict[str, dict[str, Any]]:
         return {}
 
 
+def timetables_info() -> dict[str, Any]:
+    """Describe the embedded timetables, for diagnostics.
+
+    This performs blocking file IO and must be called from an executor.
+    """
+    info: dict[str, Any] = {}
+    path = _BASE_PATH / SCHEDULES_DB
+    if path.exists():
+        try:
+            connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            try:
+                info.update(connection.execute("SELECT key, value FROM meta"))
+            finally:
+                connection.close()
+        except sqlite3.Error as exception:
+            info["error"] = str(exception)
+    end = calendar_end()
+    info["calendar_end"] = end.isoformat() if end else None
+    return info
+
+
 @lru_cache(maxsize=8)
 def active_services(today: date) -> frozenset[str]:
     """Return the set of GTFS service ids running on ``today``."""

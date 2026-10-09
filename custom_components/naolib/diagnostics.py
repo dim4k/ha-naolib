@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from . import NaolibConfigEntry, _is_bike, async_frontend_diagnostics
 from .bike import NaolibBikeCoordinator
 from .coordinator import NaolibGlobalCoordinator
+from .schedules import timetables_info
 
 
 async def async_get_config_entry_diagnostics(
@@ -41,6 +42,7 @@ async def async_get_config_entry_diagnostics(
                 else _stop_snapshot(coordinator)
             ),
         },
+        "timetables": await _async_timetables(hass, entry),
         "frontend": await async_frontend_diagnostics(hass),
     }
 
@@ -52,6 +54,13 @@ def _stop_snapshot(coordinator: NaolibGlobalCoordinator) -> dict[str, Any]:
         "indexed_quays": len(network),
         "total_departures": sum(len(visits) for visits in network.values()),
     }
+
+
+async def _async_timetables(hass: HomeAssistant, entry: NaolibConfigEntry) -> Any:
+    """Report which embedded timetables ship, so stale data is easy to spot."""
+    if _is_bike(entry):
+        return None
+    return await hass.async_add_executor_job(timetables_info)
 
 
 def _bike_snapshot(coordinator: NaolibBikeCoordinator) -> dict[str, Any]:

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 import unicodedata
 
-from .const import NEARBY_STOPS_LIMIT, STOPS_INDEX_FILE
+from .const import NEARBY_LIMIT, STOPS_INDEX_FILE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,17 +44,29 @@ def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * radius * math.asin(math.sqrt(a))
 
 
-def nearby_stops(
-    lat: float, lon: float, limit: int = NEARBY_STOPS_LIMIT
+def nearest(
+    places: list[dict[str, Any]], lat: float, lon: float, limit: int = NEARBY_LIMIT
 ) -> list[dict[str, Any]]:
-    """Return the closest stops to a location, with their distance in meters."""
-    stops = load_stops()
+    """Return the closest places to a location, with their distance in meters.
+
+    ``places`` are stops or bike stations: anything with ``lat`` and ``lon``.
+    """
     scored = [
-        {**stop, "distance": round(haversine(lat, lon, stop["lat"], stop["lon"]))}
-        for stop in stops
+        {**place, "distance": round(haversine(lat, lon, place["lat"], place["lon"]))}
+        for place in places
     ]
-    scored.sort(key=lambda stop: stop["distance"])
+    scored.sort(key=lambda place: place["distance"])
     return scored[:limit]
+
+
+def nearby_stops(
+    lat: float, lon: float, limit: int = NEARBY_LIMIT
+) -> list[dict[str, Any]]:
+    """Return the closest stops to a location.
+
+    This performs blocking file IO and must be called from an executor.
+    """
+    return nearest(load_stops(), lat, lon, limit)
 
 
 def normalize(value: str) -> str:

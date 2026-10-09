@@ -208,7 +208,7 @@ async def test_action_rejects_an_unloaded_entry(hass: HomeAssistant) -> None:
         )
 
 
-async def test_websocket_returns_the_departures_and_the_timetable(
+async def test_websocket_returns_the_timetable(
     hass: HomeAssistant, hass_ws_client
 ) -> None:
     """The card fetches the full timetable on demand over the WebSocket."""
@@ -223,7 +223,8 @@ async def test_websocket_returns_the_departures_and_the_timetable(
 
     assert response["success"]
     assert response["result"]["schedules"] == {"C3|1": {}}
-    assert len(response["result"]["next_departures"]) == 1
+    # The card reads the departures from the sensor, not from here.
+    assert "next_departures" not in response["result"]
 
 
 async def test_websocket_serves_the_timetable_of_a_following_day(
@@ -307,6 +308,8 @@ async def test_diagnostics(hass: HomeAssistant) -> None:
     assert diagnostics["entry"]["data"][CONF_STOP_CODE] == "STOP1"
     assert diagnostics["coordinator"]["indexed_quays"] == 1
     assert diagnostics["coordinator"]["total_departures"] == 1
+    assert diagnostics["timetables"]["generated_at"]
+    assert diagnostics["timetables"]["calendar_end"]
     assert diagnostics["frontend"]["loader_url"].startswith("/naolib_static/")
 
 

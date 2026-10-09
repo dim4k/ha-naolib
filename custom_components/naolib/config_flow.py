@@ -18,7 +18,7 @@ from homeassistant.helpers.selector import (
 )
 import voluptuous as vol
 
-from .bike import GbfsUnavailableError, async_fetch_stations, nearby_stations
+from .bike import GbfsUnavailableError, async_fetch_stations
 from .const import (
     CONF_ENTRY_TYPE,
     CONF_LOCATION,
@@ -35,7 +35,7 @@ from .const import (
     MAX_UPDATE_INTERVAL,
     MIN_UPDATE_INTERVAL,
 )
-from .stops import load_stops, nearby_stops, normalize
+from .stops import load_stops, nearby_stops, nearest, normalize
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -169,7 +169,7 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if stations is None:
             errors["base"] = "cannot_connect"
         else:
-            self._stations = nearby_stations(
+            self._stations = nearest(
                 stations, location["latitude"], location["longitude"]
             )
             if self._stations:
@@ -184,65 +184,22 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Choose a bike station among the ones just found."""
-        if user_input is not None:
-            station_id = user_input[CONF_STATION_ID]
-            # The selector only accepts one of the stations we just found.
-            station = next(s for s in self._stations if s["id"] == station_id)
-            station_label = station["name"]
-            unique_id = f"{BIKE_UNIQUE_ID_PREFIX}{station_id}"
+        if user_input is None:
+            return self._show_selection(
+                "select_station", CONF_STATION_ID, self._stations
+            )
 
-            data = {
+        station_id = user_input[CONF_STATION_ID]
+        # The selector only accepts one of the stations we just found.
+        station = next(s for s in self._stations if s["id"] == station_id)
+        return await self._async_save(
+            unique_id=f"{BIKE_UNIQUE_ID_PREFIX}{station_id}",
+            title=f"Station vélo : {station['name']}",
+            data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_BIKE,
                 CONF_STATION_ID: station_id,
-                CONF_STATION_LABEL: station_label,
-            }
-            title = f"Station vélo : {station_label}"
-
-            await self.async_set_unique_id(unique_id)
-
-            if self.source == config_entries.SOURCE_RECONFIGURE:
-                reconfigure_entry = self._get_reconfigure_entry()
-                # Reject if another entry already uses this station.
-                for entry in self._async_current_entries():
-                    if (
-                        entry.entry_id != reconfigure_entry.entry_id
-                        and entry.unique_id == unique_id
-                    ):
-                        return self.async_abort(reason="already_configured")
-                return self.async_update_reload_and_abort(
-                    reconfigure_entry,
-                    title=title,
-                    unique_id=unique_id,
-                    data=data,
-                )
-
-            self._abort_if_unique_id_configured()
-
-            return self.async_create_entry(title=title, data=data)
-
-        options = [
-            {
-                "value": station["id"],
-                "label": (
-                    f"{station['name']} ({station['distance']} m)"
-                    if "distance" in station
-                    else station["name"]
-                ),
-            }
-            for station in self._stations
-        ]
-        return self.async_show_form(
-            step_id="select_station",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_STATION_ID): SelectSelector(
-                        SelectSelectorConfig(
-                            options=options,
-                            mode=SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
-                }
-            ),
+                CONF_STATION_LABEL: station["name"],
+            },
         )
 
     async def async_step_reconfigure(
@@ -261,61 +218,44 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_select_stop(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle the second step: choose a stop among the nearby ones."""
-        if user_input is not None:
-            stop_code = user_input[CONF_STOP_CODE]
-            # The selector only accepts one of the stops we just found.
-            stop = next(s for s in self._stops if s["id"] == stop_code)
-            stop_label = stop["name"]
+        """Choose a stop among the ones just found."""
+        if user_input is None:
+            return self._show_selection("select_stop", CONF_STOP_CODE, self._stops)
 
-            data = {
+        stop_code = user_input[CONF_STOP_CODE]
+        # The selector only accepts one of the stops we just found.
+        stop = next(s for s in self._stops if s["id"] == stop_code)
+        return await self._async_save(
+            unique_id=stop_code,
+            title=f"Arrêt : {stop['name']}",
+            data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_STOP,
                 CONF_STOP_CODE: stop_code,
-                CONF_STOP_LABEL: stop_label,
+                CONF_STOP_LABEL: stop["name"],
                 CONF_QUAYS: stop["quays"],
-            }
+            },
+        )
 
-            await self.async_set_unique_id(stop_code)
-
-            if self.source == config_entries.SOURCE_RECONFIGURE:
-                reconfigure_entry = self._get_reconfigure_entry()
-                # Reject if another entry already uses this stop.
-                for entry in self._async_current_entries():
-                    if (
-                        entry.entry_id != reconfigure_entry.entry_id
-                        and entry.unique_id == stop_code
-                    ):
-                        return self.async_abort(reason="already_configured")
-                return self.async_update_reload_and_abort(
-                    reconfigure_entry,
-                    title=f"Arrêt : {stop_label}",
-                    unique_id=stop_code,
-                    data=data,
-                )
-
-            self._abort_if_unique_id_configured()
-
-            return self.async_create_entry(
-                title=f"Arrêt : {stop_label}",
-                data=data,
-            )
-
+    def _show_selection(
+        self, step_id: str, key: str, places: list[dict[str, Any]]
+    ) -> ConfigFlowResult:
+        """Offer the stops or stations just found in a searchable dropdown."""
         options = [
             {
-                "value": stop["id"],
+                "value": place["id"],
                 "label": (
-                    f"{stop['name']} ({stop['distance']} m)"
-                    if "distance" in stop
-                    else stop["name"]
+                    f"{place['name']} ({place['distance']} m)"
+                    if "distance" in place
+                    else place["name"]
                 ),
             }
-            for stop in self._stops
+            for place in places
         ]
         return self.async_show_form(
-            step_id="select_stop",
+            step_id=step_id,
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_STOP_CODE): SelectSelector(
+                    vol.Required(key): SelectSelector(
                         SelectSelectorConfig(
                             options=options,
                             mode=SelectSelectorMode.DROPDOWN,
@@ -324,6 +264,28 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
         )
+
+    async def _async_save(
+        self, unique_id: str, title: str, data: dict[str, Any]
+    ) -> ConfigFlowResult:
+        """Create the entry, or update the one being reconfigured."""
+        await self.async_set_unique_id(unique_id)
+
+        if self.source == config_entries.SOURCE_RECONFIGURE:
+            reconfigure_entry = self._get_reconfigure_entry()
+            # Reject if another entry already tracks this stop or station.
+            for entry in self._async_current_entries():
+                if (
+                    entry.entry_id != reconfigure_entry.entry_id
+                    and entry.unique_id == unique_id
+                ):
+                    return self.async_abort(reason="already_configured")
+            return self.async_update_reload_and_abort(
+                reconfigure_entry, title=title, unique_id=unique_id, data=data
+            )
+
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title=title, data=data)
 
     @staticmethod
     @callback

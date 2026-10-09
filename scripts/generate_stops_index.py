@@ -48,11 +48,10 @@ _DATA_DIR = (
 
 OUTPUT_PATH = _DATA_DIR / "stops_index.json"
 SCHEDULES_PATH = _DATA_DIR / "schedules.sqlite"
-LEGACY_SCHEDULES_PATH = _DATA_DIR / "schedules.json"
 CALENDAR_PATH = _DATA_DIR / "calendar.json"
 
-# Bumped whenever the stored payload changes shape, so the integration can tell
-# an outdated database from a corrupt one.
+# Bumped whenever the stored payload changes shape. Reported in the integration
+# diagnostics along with the generation date.
 SCHEDULES_FORMAT_VERSION = "1"
 
 _WEEKDAYS = (
@@ -365,9 +364,6 @@ def main() -> None:
     schedules = {station: groups for station, groups in schedules.items() if groups}
     _write_schedules(SCHEDULES_PATH, schedules)
     print(f"Wrote {len(schedules)} station timetables to {SCHEDULES_PATH}")
-
-    # Superseded by the SQLite database; removed so the stale copy never ships.
-    LEGACY_SCHEDULES_PATH.unlink(missing_ok=True)
 
     _write_json(CALENDAR_PATH, calendar)
     print(f"Wrote {len(calendar)} services to {CALENDAR_PATH}")

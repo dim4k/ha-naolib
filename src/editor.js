@@ -1,5 +1,6 @@
 import { DEFAULT_CONFIG, MAX_LINES_LIMIT, MAX_WALK_TIME } from "./config.js";
 import { isDepartureEntity, matchingEntities } from "./entities.js";
+import { NaolibFormEditor } from "./form-editor.js";
 
 const LABELS = {
     entity: "Entité (arrêt Naolib)",
@@ -106,63 +107,21 @@ function buildSchema(hass, config) {
     ];
 }
 
-// Keep the stored configuration to what the user actually changed, so the
-// YAML editor stays readable.
-function prune(config) {
-    const out = {};
-    for (const [key, value] of Object.entries(config)) {
-        if (key in DEFAULT_CONFIG) {
-            if (JSON.stringify(value) === JSON.stringify(DEFAULT_CONFIG[key])) continue;
-        }
-        out[key] = value;
-    }
-    return out;
-}
+export class NaolibCardEditor extends NaolibFormEditor {
+    static defaults = DEFAULT_CONFIG;
+    static labels = LABELS;
+    static helpers = HELPERS;
 
-export class NaolibCardEditor extends HTMLElement {
-    setConfig(config) {
-        this._config = { ...DEFAULT_CONFIG, ...(config || {}) };
-        this._render();
+    buildSchema(hass, config) {
+        return buildSchema(hass, config);
     }
 
-    set hass(hass) {
-        this._hass = hass;
-        this._render();
+    // The direction selector works with strings, the config with numbers.
+    toFormData(config) {
+        return { ...config, direction: String(config.direction) };
     }
 
-    _render() {
-        if (!this._hass || !this._config) return;
-
-        if (!this._form) {
-            this._form = document.createElement("ha-form");
-            this._form.computeLabel = (schema) => LABELS[schema.name] || schema.name;
-            this._form.computeHelper = (schema) => HELPERS[schema.name] || "";
-            this._form.addEventListener("value-changed", (ev) =>
-                this._valueChanged(ev),
-            );
-            this.appendChild(this._form);
-        }
-
-        this._form.hass = this._hass;
-        this._form.schema = buildSchema(this._hass, this._config);
-        // The direction selector works with strings, the config with numbers.
-        this._form.data = { ...this._config, direction: String(this._config.direction) };
-    }
-
-    _valueChanged(ev) {
-        ev.stopPropagation();
-        const value = ev.detail.value;
-        this._config = {
-            ...this._config,
-            ...value,
-            direction: Number(value.direction ?? 0),
-        };
-        this.dispatchEvent(
-            new CustomEvent("config-changed", {
-                detail: { config: prune(this._config) },
-                bubbles: true,
-                composed: true,
-            }),
-        );
+    fromFormData(config, value) {
+        return { ...config, ...value, direction: Number(value.direction ?? 0) };
     }
 }
