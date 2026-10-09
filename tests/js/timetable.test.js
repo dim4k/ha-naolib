@@ -103,6 +103,12 @@ describe("renderTimetable", () => {
         );
     });
 
+    it("tells stale embedded timetables apart from a day without service", () => {
+        const html = render({ schedules: {}, fetched: true, expired: true });
+        expect(html).toContain("Horaires embarqués expirés");
+        expect(html).not.toContain("Aucun horaire");
+    });
+
     it("renders one chip per line and marks the selected one", () => {
         const html = render({ selectedLine: "C1" });
         expect(html.match(/class="tt-chip[ "]/g)).toHaveLength(2);

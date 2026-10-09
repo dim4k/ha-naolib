@@ -452,7 +452,10 @@ function firstSlot(horaires) {
 function section(label, body) {
   return `<div class="tt-section"><div class="tt-label">${label}</div>${body}</div>`;
 }
-function emptyMessage(live) {
+function emptyMessage(live, expired = false) {
+  if (expired) {
+    return "Horaires embarqués expirés : mettez à jour l'intégration Naolib";
+  }
   return live ? "Aucun horaire aujourd'hui" : "Aucun horaire ce jour-là";
 }
 function renderChips(groups, selectedLine) {
@@ -557,6 +560,7 @@ function renderHours(horaires, now, next, live) {
 function renderTimetable({
   schedules,
   fetched,
+  expired = false,
   config,
   selectedLine,
   directionByLine,
@@ -570,7 +574,7 @@ function renderTimetable({
       renderTimetableHeader(),
       renderDays(dayOffset, now),
       message(
-        fetched ? emptyMessage(live) : "Chargement des horaires..."
+        fetched ? emptyMessage(live, expired) : "Chargement des horaires..."
       )
     ].join("");
   }
@@ -775,6 +779,8 @@ var NaolibCard = class extends HTMLElement {
     __publicField(this, "_schedulesByDay", /* @__PURE__ */ new Map());
     __publicField(this, "_fetchedDays", /* @__PURE__ */ new Set());
     __publicField(this, "_fetchingDays", /* @__PURE__ */ new Set());
+    // Days past the end of the embedded calendar.
+    __publicField(this, "_expiredDays", /* @__PURE__ */ new Set());
   }
   static getStubConfig(hass) {
     return { entity: findNaolibEntity(hass) || "" };
@@ -854,6 +860,7 @@ var NaolibCard = class extends HTMLElement {
   _resetScheduleState() {
     this._schedulesByDay = /* @__PURE__ */ new Map();
     this._fetchedDays = /* @__PURE__ */ new Set();
+    this._expiredDays = /* @__PURE__ */ new Set();
     this._selectedLine = null;
     this._directionByLine = /* @__PURE__ */ new Map();
     this._dayOffset = 0;
@@ -904,6 +911,7 @@ var NaolibCard = class extends HTMLElement {
       day_offset: dayOffset
     }).then((data) => {
       this._schedulesByDay.set(dayOffset, data?.schedules || {});
+      if (data?.schedules_expired) this._expiredDays.add(dayOffset);
       this._fetchedDays.add(dayOffset);
       if (this._showSchedule) this._render();
     }).catch((err) => {
@@ -998,6 +1006,7 @@ var NaolibCard = class extends HTMLElement {
         renderTimetable({
           schedules: this._schedulesByDay.get(this._dayOffset) || {},
           fetched: this._fetchedDays.has(this._dayOffset),
+          expired: this._expiredDays.has(this._dayOffset),
           config,
           selectedLine: this._selectedLine,
           directionByLine: this._directionByLine,

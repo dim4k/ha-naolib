@@ -23,14 +23,37 @@ jobs:
             - name: Regenerate stops index and timetables
               run: python scripts/generate_stops_index.py
 
-            - name: Commit changes if any
+            # HACS installs releases, not main: without a release the refreshed
+            # timetables never reach users, and the shipped calendar runs out
+            # after a few months (every day then shows no departure).
+            - name: Commit, tag and release if anything changed
+              env:
+                  GH_TOKEN: ${{ github.token }}
               run: |
-                  if [[ -n "$(git status --porcelain custom_components/naolib/data)" ]]; then
-                      git config user.name "github-actions[bot]"
-                      git config user.email "github-actions[bot]@users.noreply.github.com"
-                      git add custom_components/naolib/data
-                      git commit -m "chore: update stops index and timetables"
-                      git push
-                  else
+                  if [[ -z "$(git status --porcelain custom_components/naolib/data)" ]]; then
                       echo "Stops data already up to date."
+                      exit 0
                   fi
+
+                  # A data refresh is a patch release; only the version line of
+                  # the manifest is touched, to keep its formatting.
+                  manifest=custom_components/naolib/manifest.json
+                  current=$(python -c "import json, sys; print(json.load(open(sys.argv[1]))['version'])" "$manifest")
+                  IFS=. read -r major minor patch <<< "$current"
+                  version="$major.$minor.$((patch + 1))"
+                  sed -i -E "s/(\"version\": \")[^\"]+/\1$version/" "$manifest"
+                  # The shallow checkout has no tags: ask the remote.
+                  if [[ -n "$(git ls-remote --tags origin "refs/tags/$version")" ]]; then
+                      echo "Tag $version already exists." >&2
+                      exit 1
+                  fi
+
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+                  git add custom_components/naolib/data custom_components/naolib/manifest.json
+                  git commit -m "chore: update stops index and timetables"
+                  git tag "$version"
+                  git push origin HEAD "$version"
+                  gh release create "$version" \
+                      --title "v$version - Timetables update" \
+                      --notes "Monthly refresh of the stops index and embedded timetables from the Naolib GTFS feed."

@@ -36,6 +36,8 @@ class NaolibCard extends HTMLElement {
     _schedulesByDay = new Map();
     _fetchedDays = new Set();
     _fetchingDays = new Set();
+    // Days past the end of the embedded calendar.
+    _expiredDays = new Set();
 
     static getStubConfig(hass) {
         return { entity: findNaolibEntity(hass) || "" };
@@ -142,6 +144,7 @@ class NaolibCard extends HTMLElement {
     _resetScheduleState() {
         this._schedulesByDay = new Map();
         this._fetchedDays = new Set();
+        this._expiredDays = new Set();
         this._selectedLine = null;
         this._directionByLine = new Map();
         this._dayOffset = 0;
@@ -224,6 +227,7 @@ class NaolibCard extends HTMLElement {
             })
             .then((data) => {
                 this._schedulesByDay.set(dayOffset, data?.schedules || {});
+                if (data?.schedules_expired) this._expiredDays.add(dayOffset);
                 this._fetchedDays.add(dayOffset);
                 if (this._showSchedule) this._render();
             })
@@ -337,6 +341,7 @@ class NaolibCard extends HTMLElement {
                 renderTimetable({
                     schedules: this._schedulesByDay.get(this._dayOffset) || {},
                     fetched: this._fetchedDays.has(this._dayOffset),
+                    expired: this._expiredDays.has(this._dayOffset),
                     config,
                     selectedLine: this._selectedLine,
                     directionByLine: this._directionByLine,

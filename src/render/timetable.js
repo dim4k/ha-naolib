@@ -115,7 +115,12 @@ function section(label, body) {
     return `<div class="tt-section"><div class="tt-label">${label}</div>${body}</div>`;
 }
 
-function emptyMessage(live) {
+function emptyMessage(live, expired = false) {
+    // The timetables ship with the integration and run out after a few
+    // months: say so, otherwise it reads as a day without service.
+    if (expired) {
+        return "Horaires embarqués expirés : mettez à jour l'intégration Naolib";
+    }
     return live ? "Aucun horaire aujourd'hui" : "Aucun horaire ce jour-l\u00e0";
 }
 
@@ -266,6 +271,7 @@ function renderHours(horaires, now, next, live) {
 export function renderTimetable({
     schedules,
     fetched,
+    expired = false,
     config,
     selectedLine,
     directionByLine,
@@ -284,7 +290,7 @@ export function renderTimetable({
             renderDays(dayOffset, now),
             message(
                 fetched
-                    ? emptyMessage(live)
+                    ? emptyMessage(live, expired)
                     : "Chargement des horaires...",
             ),
         ].join("");

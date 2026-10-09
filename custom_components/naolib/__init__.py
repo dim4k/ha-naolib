@@ -51,7 +51,7 @@ from .coordinator import (
     build_stop_data,
     filter_departures,
 )
-from .schedules import build_timetable
+from .schedules import build_timetable, calendar_end
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -309,6 +309,10 @@ async def handle_get_data(
         build_timetable, stop_code, day
     )
     payload["schedules_date"] = day.isoformat()
+    # The timetables ship with the integration: once the calendar runs out,
+    # every day is empty and only an update brings them back.
+    end = await hass.async_add_executor_job(calendar_end)
+    payload["schedules_expired"] = end is not None and day > end
     connection.send_result(msg["id"], payload)
 
 

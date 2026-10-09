@@ -31,6 +31,7 @@ def _clear_caches() -> None:
     schedules.load_calendar.cache_clear()
     schedules.load_station_timetable.cache_clear()
     schedules.active_services.cache_clear()
+    schedules.calendar_end.cache_clear()
 
 
 @contextmanager
@@ -111,6 +112,22 @@ def test_active_services_applies_the_calendar_rules() -> None:
         services = schedules.active_services(date(2024, 1, 3))
 
     assert services == frozenset({"REGULAR", "ADDED"})
+
+
+def test_calendar_end_covers_regular_and_added_dates() -> None:
+    """The calendar runs until its latest end date or exceptional added date."""
+    calendar = {
+        "REGULAR": {"days": [1] * 7, "start": "20240101", "end": "20240331"},
+        "ADDED": {"days": [], "added": ["20240415"]},
+    }
+    with patch.object(schedules, "load_calendar", return_value=calendar):
+        assert schedules.calendar_end() == date(2024, 4, 15)
+
+
+def test_calendar_end_without_calendar() -> None:
+    """No calendar shipped means no known end either."""
+    with patch.object(schedules, "load_calendar", return_value={}):
+        assert schedules.calendar_end() is None
 
 
 def test_last_departures_wraps_past_midnight() -> None:

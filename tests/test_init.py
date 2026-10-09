@@ -247,6 +247,27 @@ async def test_websocket_serves_the_timetable_of_a_following_day(
     assert build_timetable.call_args.args[1] == expected
 
 
+async def test_websocket_flags_days_past_the_embedded_calendar(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    """Stale timetables are reported, not passed off as a day without service."""
+    await _setup(hass, _entry())
+    client = await hass_ws_client(hass)
+    yesterday = dt_util.now().date() - timedelta(days=1)
+
+    with (
+        patch("custom_components.naolib.build_timetable", return_value={}),
+        patch("custom_components.naolib.calendar_end", return_value=yesterday),
+    ):
+        await client.send_json_auto_id(
+            {"type": "naolib/get_data", "stop_code": "STOP1"}
+        )
+        response = await client.receive_json()
+
+    assert response["success"]
+    assert response["result"]["schedules_expired"] is True
+
+
 async def test_websocket_rejects_a_day_offset_out_of_range(
     hass: HomeAssistant, hass_ws_client
 ) -> None:

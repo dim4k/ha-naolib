@@ -103,6 +103,21 @@ def active_services(today: date) -> frozenset[str]:
     return frozenset(services)
 
 
+@lru_cache(maxsize=1)
+def calendar_end() -> date | None:
+    """Return the last date any service of the embedded calendar runs on.
+
+    Past that date the shipped timetables are stale and every day looks like a
+    day without service, so callers can tell the two apart.
+    """
+    last = ""
+    for info in load_calendar().values():
+        last = max(last, info.get("end", ""), *info.get("added", []))
+    if not last:
+        return None
+    return date(int(last[:4]), int(last[4:6]), int(last[6:8]))
+
+
 def _active_times(
     station_id: str, today: date
 ) -> Iterator[tuple[str, dict[str, Any], list[str]]]:
