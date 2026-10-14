@@ -15,7 +15,8 @@
                 "menu_options": {
                     "by_list": "Choisir dans la liste",
                     "by_location": "Chercher autour d'une position",
-                    "around": "Autour d'une personne ou zone (en direct)"
+                    "around": "Autour d'une personne ou zone (en direct)",
+                    "back_to_user": "← Retour"
                 }
             },
             "bike": {
@@ -23,7 +24,8 @@
                 "description": "Comment souhaitez-vous choisir la station ?",
                 "menu_options": {
                     "bike_by_list": "Choisir dans la liste",
-                    "bike_by_location": "Chercher autour d'une position"
+                    "bike_by_location": "Chercher autour d'une position",
+                    "back_to_user": "← Retour"
                 }
             },
             "by_location": {
@@ -31,21 +33,25 @@
                 "description": "Choisissez une zone ou déplacez le marqueur sur la carte pour rechercher les arrêts à proximité. Choisir une zone y place le marqueur.",
                 "data": {
                     "zone": "Zone",
-                    "location": "Position"
+                    "location": "Position",
+                    "back": "Revenir à l'étape précédente"
                 },
                 "data_description": {
                     "zone": "Le marqueur se place au centre de la zone ; vous pouvez encore l'ajuster.",
-                    "location": "La recherche part du marqueur."
+                    "location": "La recherche part du marqueur.",
+                    "back": "Activez puis validez."
                 }
             },
             "select_stop": {
                 "title": "Choix de l'arrêt",
                 "description": "Sélectionnez l'arrêt à suivre.",
                 "data": {
-                    "stop_code": "Arrêt"
+                    "stop_code": "Arrêt",
+                    "back": "Revenir à l'étape précédente"
                 },
                 "data_description": {
-                    "stop_code": "Saisissez quelques lettres pour filtrer la liste. La distance est affichée lors d'une recherche sur la carte."
+                    "stop_code": "Saisissez quelques lettres pour filtrer la liste. La distance est affichée lors d'une recherche sur la carte.",
+                    "back": "Activez puis validez."
                 }
             },
             "bike_by_location": {
@@ -53,21 +59,25 @@
                 "description": "Choisissez une zone ou déplacez le marqueur sur la carte pour rechercher les stations vélo à proximité. Choisir une zone y place le marqueur.",
                 "data": {
                     "zone": "Zone",
-                    "location": "Position"
+                    "location": "Position",
+                    "back": "Revenir à l'étape précédente"
                 },
                 "data_description": {
                     "zone": "Le marqueur se place au centre de la zone ; vous pouvez encore l'ajuster.",
-                    "location": "La recherche part du marqueur."
+                    "location": "La recherche part du marqueur.",
+                    "back": "Activez puis validez."
                 }
             },
             "select_station": {
                 "title": "Choix de la station vélo",
                 "description": "Sélectionnez la station à suivre.",
                 "data": {
-                    "station_id": "Station"
+                    "station_id": "Station",
+                    "back": "Revenir à l'étape précédente"
                 },
                 "data_description": {
-                    "station_id": "Saisissez quelques lettres pour filtrer la liste. La distance est affichée lors d'une recherche sur la carte."
+                    "station_id": "Saisissez quelques lettres pour filtrer la liste. La distance est affichée lors d'une recherche sur la carte.",
+                    "back": "Activez puis validez."
                 }
             },
             "around": {
@@ -76,12 +86,14 @@
                 "data": {
                     "source_entity": "Entité suivie",
                     "radius": "Rayon",
-                    "max_stops": "Nombre maximum d'arrêts"
+                    "max_stops": "Nombre maximum d'arrêts",
+                    "back": "Revenir à l'étape précédente"
                 },
                 "data_description": {
                     "source_entity": "Personne, zone ou device_tracker à suivre (doit exposer des coordonnées GPS).",
                     "radius": "Seuls les arrêts situés dans cette distance sont conservés.",
-                    "max_stops": "Au plus ce nombre d'arrêts les plus proches deviennent des capteurs."
+                    "max_stops": "Au plus ce nombre d'arrêts les plus proches deviennent des capteurs.",
+                    "back": "Activez puis validez."
                 }
             }
         },
@@ -91,7 +103,8 @@
             "cannot_connect": "Impossible de joindre le service vélo Naolib.",
             "unknown": "Erreur inattendue.",
             "not_in_list": "Choisissez un élément de la liste.",
-            "zone_without_location": "Cette zone n'a pas de coordonnées."
+            "zone_without_location": "Cette zone n'a pas de coordonnées.",
+            "no_source_entity": "Choisissez la personne, la zone ou le traceur à suivre."
         },
         "abort": {
             "already_configured": "Cet arrêt ou cette station est déjà configuré.",
