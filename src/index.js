@@ -2,6 +2,7 @@ import { NaolibCard } from "./card.js";
 import { NaolibBikeCard } from "./bike/card.js";
 import { NaolibBikeCardEditor } from "./bike/editor.js";
 import { NaolibCardEditor } from "./editor.js";
+import { bikeSuggestion, departureSuggestion } from "./suggestions.js";
 
 // The loader retries with a fresh query string, so this module can be
 // evaluated more than once per page: a second definition is not an error.
@@ -24,6 +25,7 @@ const CARDS = [
         name: "Naolib Nantes",
         preview: true,
         description: "Affiche les prochains départs (Bus/Tram) pour un arrêt donné.",
+        getEntitySuggestion: departureSuggestion,
     },
     {
         type: "naolib-bike-card",
@@ -31,6 +33,7 @@ const CARDS = [
         preview: true,
         description:
             "Affiche les vélos et places disponibles d'une station Naolib et de ses voisines.",
+        getEntitySuggestion: bikeSuggestion,
     },
 ];
 

@@ -1512,6 +1512,17 @@ __publicField(NaolibCardEditor, "defaults", DEFAULT_CONFIG);
 __publicField(NaolibCardEditor, "labels", LABELS2);
 __publicField(NaolibCardEditor, "helpers", HELPERS2);
 
+// src/suggestions.js
+function suggest(predicate, type, label) {
+  return (hass, entityId) => predicate(hass.states[entityId]) ? [{ label, config: { type: `custom:${type}`, entity: entityId } }] : [];
+}
+var departureSuggestion = suggest(
+  isDepartureEntity,
+  "naolib-card",
+  "Prochains départs"
+);
+var bikeSuggestion = suggest(isBikeEntity, "naolib-bike-card", "Station vélo");
+
 // src/index.js
 function define(tag, elementClass) {
   try {
@@ -1529,13 +1540,15 @@ var CARDS = [
     type: "naolib-card",
     name: "Naolib Nantes",
     preview: true,
-    description: "Affiche les prochains départs (Bus/Tram) pour un arrêt donné."
+    description: "Affiche les prochains départs (Bus/Tram) pour un arrêt donné.",
+    getEntitySuggestion: departureSuggestion
   },
   {
     type: "naolib-bike-card",
     name: "Naolib Vélo",
     preview: true,
-    description: "Affiche les vélos et places disponibles d'une station Naolib et de ses voisines."
+    description: "Affiche les vélos et places disponibles d'une station Naolib et de ses voisines.",
+    getEntitySuggestion: bikeSuggestion
   }
 ];
 window.customCards = window.customCards || [];
