@@ -33,6 +33,14 @@
 - **Guided setup** from a searchable list or a map, and **sensor entities** carrying every
   upcoming departure for your automations.
 
+## Use cases
+
+- **Leave on time**: show the next departures of the stop near home on a dashboard or a wall
+  tablet, with a ticking countdown and the delay of each vehicle.
+- **Get told when to leave**: an automation calls `naolib.get_departures` with your walking
+  time and notifies you when the next reachable bus is due (see [Automations](#automations)).
+- **Pick bus or bike**: check how many bikes and free docks a station has before heading out.
+
 ## Installation
 
 Requires Home Assistant 2025.2 or newer — nothing else, the integration ships its own cards.
@@ -47,8 +55,17 @@ install, copy `custom_components/naolib` into `config/custom_components` and res
 [![Add integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=naolib)
 
 Add the **Naolib** integration, choose what to track — **a stop** (bus, tram, ferry) or **a
-bike station** — then pick it from the searchable list of the whole network, or on a map
-around a location (your home coordinates are pre-filled, distances included).
+bike station** — then pick it from the list of the whole network (type a few letters to
+filter it), or search around a position: pick a **zone** (your home zone is suggested) and
+the marker on the **map** below moves onto it, or move the marker yourself. Distances are shown.
+
+A stop can also be tracked **around me**: pick a **person, zone or device tracker**, and the
+stops within a radius become sensors on their own, recomputed as the entity moves — so a
+phone's tracker turns into a live "stops near me" list. All of them read from the same shared
+network request, so following many stops still costs a single call.
+To hide a stop you never want, delete its device (from the device page, or with the cross on
+the screen shown after adding the entry): it never comes back, and no other stop takes its
+place, so keeping two of three nearby stops is just one removal.
 
 Entities are created right away; repeat to follow several stops or stations. The refresh
 interval (60 s by default, 30 to 600 s) is set from the **Configure** button. Deleting an
@@ -152,6 +169,42 @@ The `next_departures` attribute works just as well in a template trigger, withou
   scheduled workflow, then shipped as a compressed SQLite database.
 - **The cards are plain Web Components**, served by the integration itself and isolated in a
   shadow root.
+
+## Known limitations
+
+- **Polling, not push.** The public SIRI endpoint allows one request every 30 seconds per IP,
+  so the refresh interval cannot go below 30 s. On a rate limit or a gateway error the
+  integration keeps serving the last known departures until the next successful poll.
+- **Naolib network only.** Stops, timetables and bike stations cover Nantes Métropole.
+- **Shipped timetables.** The full daily timetables and the "last departure of the day" flag
+  come from the GTFS data embedded in the release; once its calendar runs out, the card shows
+  the timetable as expired until the integration is updated.
+- **No vehicle positions**: the live feed gives departure times, not where the vehicles are.
+
+## Troubleshooting
+
+- **A stop never shows any departure**: if a *Repairs* issue says the stop must be re-added,
+  it was configured before the Naolib stop identifiers changed — delete the entry and add the
+  stop again. Otherwise there may simply be no vehicle due (night, end of service).
+- **"The Naolib API is unavailable" in the logs**: the upstream endpoint is down or rate
+  limited; the last departures stay available and a message is logged when it comes back.
+- **A card is missing after an update**: reload the browser page without cache; the cards are
+  served by the integration and versioned on each release.
+- **Anything else**: enable debug logs and attach the diagnostics (from the integration's
+  menu) to an issue.
+
+  ```yaml
+  logger:
+    logs:
+      custom_components.naolib: debug
+  ```
+
+## Removal
+
+1. Go to **Settings → Devices & services → Naolib**, open each entry's menu and choose
+   **Delete**. This removes its device, entities and history.
+2. Remove the Naolib cards from your dashboards (they are not removed automatically).
+3. In HACS, open **Naolib Nantes** and choose **Remove**, then restart Home Assistant.
 
 ## Data sources
 

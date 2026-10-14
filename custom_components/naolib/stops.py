@@ -25,7 +25,8 @@ def load_stops() -> list[dict[str, Any]]:
     """
     try:
         with _INDEX_PATH.open(encoding="utf-8") as fh:
-            return json.load(fh)
+            stops: list[dict[str, Any]] = json.load(fh)
+            return stops
     except (OSError, ValueError) as exception:
         _LOGGER.error("Could not read the embedded stop index: %s", exception)
         return []
@@ -67,6 +68,31 @@ def nearby_stops(
     This performs blocking file IO and must be called from an executor.
     """
     return nearest(load_stops(), lat, lon, limit)
+
+
+def within(
+    places: list[dict[str, Any]], lat: float, lon: float, radius: float, limit: int
+) -> list[dict[str, Any]]:
+    """Return the places within ``radius`` meters, nearest first, capped.
+
+    ``places`` are stops or bike stations: anything with ``lat`` and ``lon``.
+    """
+    scored = [
+        {**place, "distance": round(haversine(lat, lon, place["lat"], place["lon"]))}
+        for place in places
+    ]
+    scored.sort(key=lambda place: place["distance"])
+    return [place for place in scored if place["distance"] <= radius][:limit]
+
+
+def stops_within(
+    lat: float, lon: float, radius: float, limit: int
+) -> list[dict[str, Any]]:
+    """Return the stops within ``radius`` meters of a location.
+
+    This performs blocking file IO and must be called from an executor.
+    """
+    return within(load_stops(), lat, lon, radius, limit)
 
 
 def normalize(value: str) -> str:

@@ -14,7 +14,9 @@
                 "description": "How do you want to pick the stop?",
                 "menu_options": {
                     "by_list": "Pick from the list",
-                    "by_location": "Search around a location"
+                    "by_location": "Search around a location",
+                    "around": "Around a person or zone (live)",
+                    "back_to_user": "← Back"
                 }
             },
             "bike": {
@@ -22,47 +24,76 @@
                 "description": "How do you want to pick the station?",
                 "menu_options": {
                     "bike_by_list": "Pick from the list",
-                    "bike_by_location": "Search around a location"
+                    "bike_by_location": "Search around a location",
+                    "back_to_user": "← Back"
                 }
             },
             "by_location": {
                 "title": "Search around a location",
-                "description": "Pick a location on the map to search for nearby stops.",
+                "description": "Pick a zone or move the marker on the map to search for nearby stops. Picking a zone moves the marker onto it.",
                 "data": {
-                    "location": "Location"
+                    "zone": "Zone",
+                    "location": "Location",
+                    "back": "Go back to the previous step"
                 },
                 "data_description": {
-                    "location": "Move the marker to the area where you want to look for stops. Defaults to your home location."
+                    "zone": "The marker moves to the centre of the zone; you can still adjust it.",
+                    "location": "The search starts from the marker.",
+                    "back": "Switch on, then confirm."
                 }
             },
             "select_stop": {
                 "title": "Stop selection",
                 "description": "Select the stop to track.",
                 "data": {
-                    "stop_code": "Stop"
+                    "stop_code": "Stop",
+                    "back": "Go back to the previous step"
                 },
                 "data_description": {
-                    "stop_code": "Type a few letters to filter the list. The distance is shown when searching from the map."
+                    "stop_code": "Type a few letters to filter the list. The distance is shown when searching from the map.",
+                    "back": "Switch on, then confirm."
                 }
             },
             "bike_by_location": {
                 "title": "Search around a location",
-                "description": "Pick a location on the map to search for nearby bike stations.",
+                "description": "Pick a zone or move the marker on the map to search for nearby bike stations. Picking a zone moves the marker onto it.",
                 "data": {
-                    "location": "Location"
+                    "zone": "Zone",
+                    "location": "Location",
+                    "back": "Go back to the previous step"
                 },
                 "data_description": {
-                    "location": "Move the marker to the area where you want to look for stations. Defaults to your home location."
+                    "zone": "The marker moves to the centre of the zone; you can still adjust it.",
+                    "location": "The search starts from the marker.",
+                    "back": "Switch on, then confirm."
                 }
             },
             "select_station": {
                 "title": "Bike station selection",
                 "description": "Select the station to track.",
                 "data": {
-                    "station_id": "Station"
+                    "station_id": "Station",
+                    "back": "Go back to the previous step"
                 },
                 "data_description": {
-                    "station_id": "Type a few letters to filter the list. The distance is shown when searching from the map."
+                    "station_id": "Type a few letters to filter the list. The distance is shown when searching from the map.",
+                    "back": "Switch on, then confirm."
+                }
+            },
+            "around": {
+                "title": "Around a tracked entity",
+                "description": "Follow a person, zone or device tracker. The stops within the radius become sensors and update as it moves.",
+                "data": {
+                    "source_entity": "Tracked entity",
+                    "radius": "Radius",
+                    "max_stops": "Maximum number of stops",
+                    "back": "Go back to the previous step"
+                },
+                "data_description": {
+                    "source_entity": "Person, zone or device_tracker to follow (must expose GPS coordinates).",
+                    "radius": "Only stops within this distance are kept.",
+                    "max_stops": "At most this many of the closest stops become sensors.",
+                    "back": "Switch on, then confirm."
                 }
             }
         },
@@ -70,7 +101,10 @@
             "no_stops_found": "No matching stop found.",
             "no_stations_found": "No matching bike station found.",
             "cannot_connect": "Could not reach the Naolib bike service.",
-            "unknown": "Unexpected error."
+            "unknown": "Unexpected error.",
+            "not_in_list": "Pick an entry from the list.",
+            "zone_without_location": "This zone has no coordinates.",
+            "no_source_entity": "Pick the person, zone or device tracker to follow."
         },
         "abort": {
             "already_configured": "This stop or station is already configured.",
@@ -145,6 +179,11 @@
         "entry_wrong_type": {
             "message": "{target} is a bike station: this action only applies to stops."
         }
+    },
+    "issues": {
+        "missing_quays": {
+            "title": "Stop {stop} must be re-added",
+            "description": "The stop {stop} was configured before the Naolib stop identifiers changed, so it has no quays and cannot show any departure. Delete this entry and add the stop again."
+        }
     }
 }
-

@@ -16,7 +16,19 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .bike import NaolibBikeCoordinator, NaolibBikeStation, build_station_data
-from .const import DOMAIN
+from .const import (
+    CONF_ENTRY_TYPE,
+    CONF_EXCLUDED_STOPS,
+    CONF_MAX_STOPS,
+    CONF_RADIUS,
+    CONF_SOURCE_ENTITY,
+    CONF_UPDATE_INTERVAL,
+    DEFAULT_AROUND_MAX_STOPS,
+    DEFAULT_AROUND_RADIUS,
+    DEFAULT_UPDATE_INTERVAL,
+    DOMAIN,
+    ENTRY_TYPE_AROUND,
+)
 from .coordinator import NaolibGlobalCoordinator, NaolibStop, build_stop_data
 
 if TYPE_CHECKING:
@@ -42,6 +54,26 @@ async def async_setup_entry(
                 NaolibDocksAvailableSensor(coordinator, station),
             ]
         )
+        return
+
+    if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_AROUND:
+        # Imported here to avoid a circular import: around imports this module.
+        from .around import NaolibAroundController
+
+        controller = NaolibAroundController(
+            hass,
+            entry,
+            coordinator,
+            async_add_entities,
+            source_entity=entry.data[CONF_SOURCE_ENTITY],
+            radius=entry.data.get(CONF_RADIUS, DEFAULT_AROUND_RADIUS),
+            max_stops=entry.data.get(CONF_MAX_STOPS, DEFAULT_AROUND_MAX_STOPS),
+            excluded=entry.data.get(CONF_EXCLUDED_STOPS, []),
+            interval=int(
+                entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
+            ),
+        )
+        await controller.async_start()
         return
 
     async_add_entities(
@@ -73,7 +105,6 @@ class NaolibNextDeparturesSensor(
         super().__init__(coordinator)
         self._stop = stop
         self._attr_unique_id = f"naolib_{stop.code}_next"
-        self._attr_icon = "mdi:bus-clock"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, stop.code)},
             name=f"Arrêt {stop.name}",
@@ -91,7 +122,8 @@ class NaolibNextDeparturesSensor(
     @property
     def native_value(self) -> datetime | None:
         """Return the timestamp of the very next bus, or None if none."""
-        return self._stop_data["next_departure_dt"]
+        next_departure: datetime | None = self._stop_data["next_departure_dt"]
+        return next_departure
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -101,6 +133,35 @@ class NaolibNextDeparturesSensor(
             "stop_label": self._stop.name,
             "next_departures": self._stop_data["next_departures"],
         }
+
+
+def around_device_identifier(entry_id: str, stop_code: str) -> tuple[str, str]:
+    """Return the device identifier of a stop shown by an "around me" entry."""
+    return (DOMAIN, f"around_{entry_id}_{stop_code}")
+
+
+class NaolibAroundDeparturesSensor(NaolibNextDeparturesSensor):
+    """A nearby-stop sensor created on the fly by an "around me" entry.
+
+    Its unique id and device are namespaced by the entry, so tracking the same
+    stop from a fixed entry and from an "around me" entry does not collide.
+    """
+
+    def __init__(
+        self,
+        coordinator: NaolibGlobalCoordinator,
+        stop: NaolibStop,
+        entry_id: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, stop)
+        self._attr_unique_id = f"naolib_around_{entry_id}_{stop.code}_next"
+        self._attr_device_info = DeviceInfo(
+            identifiers={around_device_identifier(entry_id, stop.code)},
+            name=f"Arrêt {stop.name}",
+            manufacturer="Naolib",
+            model="Arrêt",
+        )
 
 
 class NaolibBikeStationSensor(CoordinatorEntity[NaolibBikeCoordinator], SensorEntity):
@@ -145,7 +206,6 @@ class NaolibBikesAvailableSensor(NaolibBikeStationSensor):
     """Number of bikes ready to rent at the station."""
 
     _attr_translation_key = "bikes_available"
-    _attr_icon = "mdi:bike"
 
     # Rebuilt on every poll and only useful to the card; keeping it out of the
     # recorder avoids bloating the database.
@@ -189,7 +249,6 @@ class NaolibDocksAvailableSensor(NaolibBikeStationSensor):
     """Number of free docks at the station."""
 
     _attr_translation_key = "docks_available"
-    _attr_icon = "mdi:rhombus-outline"
     _attr_native_unit_of_measurement = "places"
 
     def __init__(

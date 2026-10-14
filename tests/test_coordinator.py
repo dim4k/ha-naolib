@@ -8,7 +8,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
 import pytest
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
+from custom_components.naolib.const import API_MIN_SPACING
 from custom_components.naolib.coordinator import (
     NaolibGlobalCoordinator,
     NaolibStop,
@@ -209,3 +211,37 @@ async def test_transient_failure_serves_the_last_snapshot(
 
     assert "available again" in caplog.text
     assert last.called
+
+
+async def test_refresh_requests_wait_for_the_rate_limit(hass: HomeAssistant) -> None:
+    """A refresh asked too soon after a call waits for the window to end."""
+    coordinator = NaolibGlobalCoordinator(hass)
+    coordinator.register_stop("e1", NaolibStop("S1", "A", ["Q1"], 60))
+    clock = [1000.0]
+    with (
+        patch(
+            "custom_components.naolib.coordinator.time.monotonic",
+            side_effect=lambda: clock[0],
+        ),
+        patch.object(
+            coordinator.api, "async_get_all_departures", return_value={}
+        ) as fetch,
+        patch("custom_components.naolib.coordinator.last_departures", return_value={}),
+    ):
+        await coordinator.async_request_refresh()
+        await hass.async_block_till_done()
+        assert fetch.call_count == 1
+
+        # Within the 30 s window: put off, however many times it is asked.
+        clock[0] += 5
+        await coordinator.async_request_refresh()
+        await coordinator.async_request_refresh()
+        await hass.async_block_till_done()
+        assert fetch.call_count == 1
+
+        clock[0] += API_MIN_SPACING
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=40))
+        await hass.async_block_till_done()
+        assert fetch.call_count == 2
+
+    coordinator.unregister_stop("e1")
