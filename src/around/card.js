@@ -2,7 +2,7 @@ import { NaolibBaseCard } from "../base-card.js";
 import { aroundSensors, aroundSources, isAroundEntity } from "../entities.js";
 import { TICK_MS } from "../constants.js";
 import { normalizeAroundConfig, prepareStops } from "./config.js";
-import { renderAround } from "./render.js";
+import { noStopsMessage, renderAround } from "./render.js";
 
 // Lists the stops of an "around me" entry, nearest first, with their next
 // departures. Unlike the other cards it shows several sensors: every
@@ -66,14 +66,14 @@ export class NaolibAroundCard extends NaolibBaseCard {
         this._key = key;
         this._sensors = sensors;
 
-        const name = hass.states[source]?.attributes?.friendly_name || source;
-        this._updateTitle(this.config.title || `Autour de ${name}`);
+        this._name = hass.states[source]?.attributes?.friendly_name || source;
+        this._updateTitle(this.config.title || `Autour de ${this._name}`);
         this._render();
     }
 
     _render() {
         if (!this._sensors.length) {
-            this._message("Aucun arrêt à proximité pour le moment.");
+            this._message(noStopsMessage(this._name));
             return;
         }
         this.content.innerHTML = renderAround(

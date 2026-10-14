@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeAroundConfig, prepareStops } from "../../src/around/config.js";
-import { renderAround } from "../../src/around/render.js";
+import { noStopsMessage, renderAround } from "../../src/around/render.js";
 import { aroundSensors, aroundSources } from "../../src/entities.js";
 import { aroundSuggestion } from "../../src/suggestions.js";
 
@@ -116,5 +116,14 @@ describe("around sources", () => {
             },
         ]);
         expect(aroundSuggestion(HASS, "person.nobody")).toEqual([]);
+    });
+});
+
+describe("noStopsMessage", () => {
+    it("points to the entry settings and escapes the name", () => {
+        const html = noStopsMessage("<Paul>");
+        expect(html).toContain("&lt;Paul&gt;");
+        expect(html).toContain("autour de moi");
+        expect(html).toContain("rayon");
     });
 });

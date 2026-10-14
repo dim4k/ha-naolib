@@ -597,6 +597,9 @@ function stopHtml(stop) {
 function renderAround(stops) {
   return `<div class="around">${stops.map(stopHtml).join("")}</div>`;
 }
+function noStopsMessage(name) {
+  return `Aucun arrêt pour ${esc(name)}. Vérifiez qu'une entrée Naolib « autour de moi » suit cette entité (Paramètres &gt; Appareils et services) ; le rayon et le nombre d'arrêts s'y règlent.`;
+}
 
 // src/around/card.js
 var NaolibAroundCard = class extends NaolibBaseCard {
@@ -638,13 +641,13 @@ var NaolibAroundCard = class extends NaolibBaseCard {
     if (key === this._key) return;
     this._key = key;
     this._sensors = sensors;
-    const name = hass.states[source]?.attributes?.friendly_name || source;
-    this._updateTitle(this.config.title || `Autour de ${name}`);
+    this._name = hass.states[source]?.attributes?.friendly_name || source;
+    this._updateTitle(this.config.title || `Autour de ${this._name}`);
     this._render();
   }
   _render() {
     if (!this._sensors.length) {
-      this._message("Aucun arrêt à proximité pour le moment.");
+      this._message(noStopsMessage(this._name));
       return;
     }
     this.content.innerHTML = renderAround(
@@ -739,22 +742,17 @@ var LABELS = {
   compact: "Mode compact"
 };
 var HELPERS = {
-  entity: "Celle d'une entrée Naolib « autour de moi ».",
+  entity: "Elle doit être suivie par une entrée Naolib « autour de moi » : le rayon et le nombre d'arrêts se règlent dans cette entrée.",
   title: "Laisser vide pour « Autour de … ».",
   max_stops: "Mettre à 0 pour afficher tous les arrêts de l'entrée."
 };
-function buildSchema(hass, config) {
-  const sources = aroundSources(hass);
-  if (config.entity && !sources.includes(config.entity)) sources.push(config.entity);
+function buildSchema() {
   return [
     {
       name: "entity",
       required: true,
       selector: {
-        entity: {
-          filter: [{ domain: ["person", "zone", "device_tracker"] }],
-          include_entities: sources
-        }
+        entity: { filter: [{ domain: ["person", "zone", "device_tracker"] }] }
       }
     },
     { name: "title", selector: { text: {} } },
@@ -776,8 +774,8 @@ function buildSchema(hass, config) {
   ];
 }
 var NaolibAroundCardEditor = class extends NaolibFormEditor {
-  buildSchema(hass, config) {
-    return buildSchema(hass, config);
+  buildSchema() {
+    return buildSchema();
   }
 };
 __publicField(NaolibAroundCardEditor, "defaults", DEFAULT_AROUND_CONFIG);
