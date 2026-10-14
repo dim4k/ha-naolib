@@ -15,7 +15,7 @@ from homeassistant.core import (
     SupportsResponse,
 )
 from homeassistant.exceptions import ServiceValidationError
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 from homeassistant.util import dt as dt_util
@@ -30,6 +30,7 @@ from .const import (
     ATTR_WALK_TIME,
     CARD_URL_PATH,
     CONF_ENTRY_TYPE,
+    CONF_EXCLUDED_STOPS,
     CONF_QUAYS,
     CONF_SOURCE_ENTITY,
     CONF_STATION_ID,
@@ -354,6 +355,33 @@ def _timetable(
 ) -> tuple[dict[str, dict[str, Any]], date | None]:
     """Read a day's timetable and the end of the calendar in one executor job."""
     return build_timetable(stop_code, day), calendar_end()
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: NaolibConfigEntry, device: dr.DeviceEntry
+) -> bool:
+    """Allow deleting a nearby stop of an "around me" entry, to hide it.
+
+    The stop is added to the entry's exclusions, so it never comes back, even
+    when the tracked entity returns near it. Stops and bike stations of the
+    other entries are what the entry is about: they cannot be deleted alone.
+    """
+    if not _is_around(entry):
+        return False
+    prefix = f"around_{entry.entry_id}_"
+    codes = [
+        identifier.removeprefix(prefix)
+        for domain, identifier in device.identifiers
+        if domain == DOMAIN and identifier.startswith(prefix)
+    ]
+    if not codes:
+        return False
+    excluded = set(entry.data.get(CONF_EXCLUDED_STOPS, [])) | set(codes)
+    # Updating the entry reloads it, and the controller then skips the stop.
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_EXCLUDED_STOPS: sorted(excluded)}
+    )
+    return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bool:

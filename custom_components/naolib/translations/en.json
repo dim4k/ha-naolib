@@ -83,13 +83,6 @@
                     "radius": "Only stops within this distance are kept.",
                     "max_stops": "At most this many of the closest stops become sensors."
                 }
-            },
-            "around_stops": {
-                "title": "Stops to keep",
-                "description": "These stops are within the radius right now. Untick the ones you do not want: they stay hidden, even when you come back near them, and the next closest stop takes their place. Other stops still show up as you move.",
-                "data": {
-                    "stops": "Stops"
-                }
             }
         },
         "error": {

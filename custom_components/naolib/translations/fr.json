@@ -83,13 +83,6 @@
                     "radius": "Seuls les arrêts situés dans cette distance sont conservés.",
                     "max_stops": "Au plus ce nombre d'arrêts les plus proches deviennent des capteurs."
                 }
-            },
-            "around_stops": {
-                "title": "Arrêts à garder",
-                "description": "Ces arrêts sont actuellement dans le rayon. Décochez ceux que vous ne voulez pas : ils restent masqués, même quand vous repassez à proximité, et l'arrêt suivant le plus proche prend leur place. Les autres arrêts continuent d'apparaître au fil de vos déplacements.",
-                "data": {
-                    "stops": "Arrêts"
-                }
             }
         },
         "error": {
