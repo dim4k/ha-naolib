@@ -5,6 +5,7 @@
 // src/flow-dialog.js
 var FLOW_DIALOG = "dialog-data-entry-flow";
 var POLL_MS = 300;
+var APPEAR_MS = 3e3;
 var MAX_POLL_MS = 10 * 60 * 1e3;
 function findAll(root, localName, found = []) {
   if (!root) return found;
@@ -16,15 +17,21 @@ function findAll(root, localName, found = []) {
 var helpers = /* @__PURE__ */ new Set();
 var polling = null;
 var listening = false;
+function isOpen(app) {
+  return findAll(app, FLOW_DIALOG).some(
+    (dialog) => dialog.shadowRoot?.querySelector("ha-dialog")
+  );
+}
 function poll() {
   if (polling) return;
   const started = Date.now();
   let seen = false;
   polling = setInterval(() => {
     const app = document.querySelector("home-assistant");
-    const open = findAll(app, FLOW_DIALOG).length > 0;
+    const open = isOpen(app);
     seen || (seen = open);
-    if (seen && !open || Date.now() - started > MAX_POLL_MS) {
+    const elapsed = Date.now() - started;
+    if (seen && !open || !seen && elapsed > APPEAR_MS || elapsed > MAX_POLL_MS) {
       clearInterval(polling);
       polling = null;
       return;
@@ -49,6 +56,7 @@ function whileFlowDialogOpen(helper) {
     },
     true
   );
+  poll();
 }
 
 // src/flow-back.js
