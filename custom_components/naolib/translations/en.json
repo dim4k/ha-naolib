@@ -145,6 +145,11 @@
         "entry_wrong_type": {
             "message": "{target} is a bike station: this action only applies to stops."
         }
+    },
+    "issues": {
+        "missing_quays": {
+            "title": "Stop {stop} must be re-added",
+            "description": "The stop {stop} was configured before the Naolib stop identifiers changed, so it has no quays and cannot show any departure. Delete this entry and add the stop again."
+        }
     }
 }
-

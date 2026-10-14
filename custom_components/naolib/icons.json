@@ -1,0 +1,20 @@
+{
+    "entity": {
+        "sensor": {
+            "next_departures": {
+                "default": "mdi:bus-clock"
+            },
+            "bikes_available": {
+                "default": "mdi:bike"
+            },
+            "docks_available": {
+                "default": "mdi:rhombus-outline"
+            }
+        }
+    },
+    "services": {
+        "get_departures": {
+            "service": "mdi:bus-clock"
+        }
+    }
+}
