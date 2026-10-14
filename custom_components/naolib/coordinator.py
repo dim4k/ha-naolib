@@ -11,16 +11,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 import logging
+import time
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from .api import NaolibApiClient
 from .bike import NaolibBikeCoordinator
-from .const import DEFAULT_UPDATE_INTERVAL, DOMAIN
+from .const import API_MIN_SPACING, DEFAULT_UPDATE_INTERVAL, DOMAIN
 from .schedules import last_departures
 
 _LOGGER = logging.getLogger(__name__)
@@ -67,6 +70,41 @@ class NaolibGlobalCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any
         # only the entry id reliably identifies what to drop on unload.
         self.stops: dict[str, NaolibStop] = {}
         self._unavailable_logged = False
+        # When the endpoint was last called, and a refresh put off until the
+        # rate limit allows the next call.
+        self._last_fetch = 0.0
+        self._deferred_refresh: CALLBACK_TYPE | None = None
+        # Shared and tied to no entry: nothing else would drop a pending one.
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._cancel_deferred)
+
+    async def async_request_refresh(self) -> None:
+        """Refresh soon, without breaking the endpoint's rate limit.
+
+        Stops added on the fly (an entry set up, an "around me" entity moving)
+        ask for a refresh so their departures show up. Within 30 s of the last
+        call that would only earn a 429, and Home Assistant's debouncer may
+        even ask twice: such a request waits for the window to end instead.
+        """
+        wait = self._last_fetch + API_MIN_SPACING - time.monotonic()
+        if wait <= 0:
+            await super().async_request_refresh()
+            return
+        if self._deferred_refresh is None:
+            self._deferred_refresh = async_call_later(
+                self.hass, wait, self._async_deferred_refresh
+            )
+
+    @callback
+    def _cancel_deferred(self, _event: Event | None = None) -> None:
+        """Drop a refresh put off by async_request_refresh, if any."""
+        if self._deferred_refresh is not None:
+            self._deferred_refresh()
+            self._deferred_refresh = None
+
+    async def _async_deferred_refresh(self, _now: datetime) -> None:
+        """Run the refresh put off by async_request_refresh."""
+        self._deferred_refresh = None
+        await super().async_request_refresh()
 
     def register_stop(self, entry_id: str, stop: NaolibStop) -> None:
         """Start serving a configured stop."""
@@ -76,6 +114,8 @@ class NaolibGlobalCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any
     def unregister_stop(self, entry_id: str) -> None:
         """Stop serving a configured stop."""
         self.stops.pop(entry_id, None)
+        if not self.stops:
+            self._cancel_deferred()
         self._apply_interval()
 
     def stop_by_code(self, stop_code: str) -> NaolibStop | None:
@@ -95,6 +135,7 @@ class NaolibGlobalCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any
     async def _async_update_data(self) -> dict[str, list[dict[str, Any]]]:
         """Fetch the whole network once."""
         wanted = {quay for stop in self.stops.values() for quay in stop.quays}
+        self._last_fetch = time.monotonic()
         data = await self.api.async_get_all_departures(wanted or None)
         if data is None:
             if self.data is None:
