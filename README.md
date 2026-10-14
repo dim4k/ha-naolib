@@ -55,6 +55,8 @@ A stop can also be tracked **around me**: pick a **person, zone or device tracke
 stops within a radius become sensors on their own, recomputed as the entity moves — so a
 phone's tracker turns into a live "stops near me" list. All of them read from the same shared
 network request, so following many stops still costs a single call.
+A second page lists the stops currently in the radius: untick the ones you never want, and
+the next closest stop takes their place.
 
 Entities are created right away; repeat to follow several stops or stations. The refresh
 interval (60 s by default, 30 to 600 s) is set from the **Configure** button. Deleting an

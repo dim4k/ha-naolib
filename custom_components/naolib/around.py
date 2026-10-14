@@ -44,6 +44,7 @@ class NaolibAroundController:
         radius: float,
         max_stops: int,
         interval: int,
+        excluded: list[str] | None = None,
     ) -> None:
         """Initialize the controller."""
         self._hass = hass
@@ -54,6 +55,9 @@ class NaolibAroundController:
         self._radius = radius
         self._max_stops = max_stops
         self._interval = interval
+        # Stops the user unticked: never shown, and their slot goes to the next
+        # closest stop.
+        self._excluded = set(excluded or [])
         self._catalog: list[dict[str, Any]] = []
         # Keyed by the coordinator key ``f"{entry_id}:{stop_code}"``.
         self._stops: dict[str, NaolibStop] = {}
@@ -62,7 +66,8 @@ class NaolibAroundController:
 
     async def async_start(self) -> None:
         """Load the catalogue, watch the entity and do a first computation."""
-        self._catalog = await self._hass.async_add_executor_job(load_stops)
+        catalog = await self._hass.async_add_executor_job(load_stops)
+        self._catalog = [stop for stop in catalog if stop["id"] not in self._excluded]
         self._entry.async_on_unload(
             async_track_state_change_event(
                 self._hass, [self._source_entity], self._handle_move

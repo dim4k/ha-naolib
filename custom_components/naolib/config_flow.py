@@ -25,6 +25,7 @@ import voluptuous as vol
 from .bike import GbfsUnavailableError, async_fetch_stations
 from .const import (
     CONF_ENTRY_TYPE,
+    CONF_EXCLUDED_STOPS,
     CONF_LOCATION,
     CONF_MAX_STOPS,
     CONF_QUAYS,
@@ -50,7 +51,7 @@ from .const import (
     MIN_AROUND_RADIUS,
     MIN_UPDATE_INTERVAL,
 )
-from .stops import load_stops, nearby_stops, nearest, normalize
+from .stops import load_stops, nearby_stops, nearest, normalize, stops_within
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,6 +72,10 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Where the map opens: the centre of the zone picked on the previous
         # page, or home.
         self._map_center: dict[str, float] | None = None
+        # "Around me": the settings of the first page and the stops currently
+        # within the radius, offered for removal on the second page.
+        self._around: dict[str, Any] = {}
+        self._candidates: list[dict[str, Any]] = []
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -152,7 +157,7 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not zone:
             self._map_center = self._home()
             return None
-        center = self._zone_center(zone)
+        center = self._entity_coords(zone)
         if center is None:
             return self.async_show_form(
                 step_id=step_id,
@@ -161,17 +166,6 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
         self._map_center = {"latitude": center[0], "longitude": center[1]}
         return None
-
-    def _zone_center(self, entity_id: str) -> tuple[float, float] | None:
-        """Return the centre of a zone, or None if it has no coordinates."""
-        state = self.hass.states.get(entity_id)
-        if state is None:
-            return None
-        latitude = state.attributes.get("latitude")
-        longitude = state.attributes.get("longitude")
-        if latitude is None or longitude is None:
-            return None
-        return float(latitude), float(longitude)
 
     async def _async_search_stops(
         self, latitude: float, longitude: float
@@ -237,18 +231,30 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Follow a person/zone/device_tracker and expose the nearby stops."""
         if user_input is not None:
-            source_entity = user_input[CONF_SOURCE_ENTITY]
-            label = self._entity_label(source_entity)
-            return await self._async_save(
-                unique_id=f"around_{source_entity}",
-                title=f"Autour de : {label}",
-                data={
-                    CONF_ENTRY_TYPE: ENTRY_TYPE_AROUND,
-                    CONF_SOURCE_ENTITY: source_entity,
-                    CONF_RADIUS: int(user_input[CONF_RADIUS]),
-                    CONF_MAX_STOPS: int(user_input[CONF_MAX_STOPS]),
-                },
+            self._around = {
+                CONF_ENTRY_TYPE: ENTRY_TYPE_AROUND,
+                CONF_SOURCE_ENTITY: user_input[CONF_SOURCE_ENTITY],
+                CONF_RADIUS: int(user_input[CONF_RADIUS]),
+                CONF_MAX_STOPS: int(user_input[CONF_MAX_STOPS]),
+                CONF_EXCLUDED_STOPS: self._previous_exclusions(),
+            }
+            coords = self._entity_coords(user_input[CONF_SOURCE_ENTITY])
+            self._candidates = (
+                []
+                if coords is None
+                else await self.hass.async_add_executor_job(
+                    stops_within,
+                    coords[0],
+                    coords[1],
+                    self._around[CONF_RADIUS],
+                    MAX_AROUND_MAX_STOPS,
+                )
             )
+            if not self._candidates:
+                # Nothing to choose from (no position yet, or no stop around):
+                # keep the exclusions as they are.
+                return await self._async_save_around()
+            return await self.async_step_around_stops()
 
         defaults = self._around_defaults()
         schema = vol.Schema(
@@ -282,6 +288,74 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }
         )
         return self.async_show_form(step_id="around", data_schema=schema)
+
+    async def async_step_around_stops(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Untick the nearby stops that should never be shown."""
+        excluded = set(self._around[CONF_EXCLUDED_STOPS])
+        if user_input is not None:
+            kept = set(user_input.get("stops", []))
+            offered = {stop["id"] for stop in self._candidates}
+            # Exclusions of stops not offered now (far from here) are kept.
+            self._around[CONF_EXCLUDED_STOPS] = sorted(
+                (excluded - offered) | (offered - kept)
+            )
+            return await self._async_save_around()
+
+        options = [
+            SelectOptionDict(
+                value=stop["id"], label=f"{stop['name']} ({stop['distance']} m)"
+            )
+            for stop in self._candidates
+        ]
+        return self.async_show_form(
+            step_id="around_stops",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        "stops",
+                        default=[
+                            stop["id"]
+                            for stop in self._candidates
+                            if stop["id"] not in excluded
+                        ],
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=options,
+                            multiple=True,
+                            mode=SelectSelectorMode.LIST,
+                        )
+                    ),
+                }
+            ),
+        )
+
+    async def _async_save_around(self) -> ConfigFlowResult:
+        """Create (or update) the "around me" entry from the collected data."""
+        source_entity = self._around[CONF_SOURCE_ENTITY]
+        return await self._async_save(
+            unique_id=f"around_{source_entity}",
+            title=f"Autour de : {self._entity_label(source_entity)}",
+            data=self._around,
+        )
+
+    def _previous_exclusions(self) -> list[str]:
+        """Return the stops excluded by the entry being reconfigured, if any."""
+        if self.source != config_entries.SOURCE_RECONFIGURE:
+            return []
+        return list(self._get_reconfigure_entry().data.get(CONF_EXCLUDED_STOPS, []))
+
+    def _entity_coords(self, entity_id: str) -> tuple[float, float] | None:
+        """Return the GPS coordinates of an entity, if it has any."""
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return None
+        latitude = state.attributes.get("latitude")
+        longitude = state.attributes.get("longitude")
+        if latitude is None or longitude is None:
+            return None
+        return float(latitude), float(longitude)
 
     def _around_defaults(self) -> dict[str, Any]:
         """Pre-fill the "around me" form, reusing a reconfigured entry."""

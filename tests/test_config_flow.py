@@ -11,6 +11,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.naolib.bike import GbfsUnavailableError
 from custom_components.naolib.const import (
     CONF_ENTRY_TYPE,
+    CONF_EXCLUDED_STOPS,
     CONF_LOCATION,
     CONF_MAX_STOPS,
     CONF_QUAYS,
@@ -283,7 +284,93 @@ async def test_around_flow_creates_the_entry(hass: HomeAssistant) -> None:
         CONF_SOURCE_ENTITY: "person.me",
         CONF_RADIUS: 600,
         CONF_MAX_STOPS: 3,
+        CONF_EXCLUDED_STOPS: [],
     }
+
+
+_NEARBY = [
+    {"id": "STOP1", "name": "Commerce", "quays": ["QUAY1"], "distance": 42},
+    {"id": "STOP2", "name": "Bouffay", "quays": ["QUAY2"], "distance": 300},
+    {"id": "STOP3", "name": "Duchesse Anne", "quays": ["QUAY3"], "distance": 450},
+]
+
+
+async def _around_with_stops(hass: HomeAssistant, flow_id: str, entity: str) -> dict:
+    """Submit the first "around me" page with stops found in the radius."""
+    with patch(
+        "custom_components.naolib.config_flow.stops_within", return_value=_NEARBY
+    ) as search:
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            {CONF_SOURCE_ENTITY: entity, CONF_RADIUS: 500, CONF_MAX_STOPS: 5},
+        )
+    search.assert_called_once_with(47.2143, -1.5595, 500, 15)
+    return result
+
+
+async def test_around_lets_the_user_remove_stops(hass: HomeAssistant) -> None:
+    """The stops in the radius are offered, all ticked; unticked ones are excluded."""
+    hass.states.async_set(
+        "person.me",
+        "home",
+        {"friendly_name": "Me", "latitude": 47.2143, "longitude": -1.5595},
+    )
+    result = await _menu(hass, "stop", "around")
+    result = await _around_with_stops(hass, result["flow_id"], "person.me")
+
+    assert result["step_id"] == "around_stops"
+    assert result["data_schema"]({}) == {"stops": ["STOP1", "STOP2", "STOP3"]}
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"stops": ["STOP1", "STOP3"]}
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_EXCLUDED_STOPS] == ["STOP2"]
+
+
+async def test_around_reconfigure_keeps_the_exclusions(hass: HomeAssistant) -> None:
+    """Reconfiguring shows past exclusions unticked and keeps far-away ones."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="around_person.me",
+        title="Autour de : person.me",
+        data={
+            **_around_entry("person.me").data,
+            CONF_EXCLUDED_STOPS: ["STOP2", "FAR_AWAY"],
+        },
+    )
+    entry.add_to_hass(hass)
+    hass.states.async_set(
+        "person.me", "home", {"latitude": 47.2143, "longitude": -1.5595}
+    )
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await _around_with_stops(hass, result["flow_id"], "person.me")
+    assert result["data_schema"]({}) == {"stops": ["STOP1", "STOP3"]}
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"stops": ["STOP1", "STOP2"]}
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_EXCLUDED_STOPS] == ["FAR_AWAY", "STOP3"]
+
+
+async def test_around_with_an_unknown_entity_skips_the_stops(
+    hass: HomeAssistant,
+) -> None:
+    """Without a state there is no position, so the entry is created directly."""
+    result = await _menu(hass, "stop", "around")
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_SOURCE_ENTITY: "person.ghost", CONF_RADIUS: 500, CONF_MAX_STOPS: 5},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Autour de : person.ghost"
+    assert result["data"][CONF_EXCLUDED_STOPS] == []
 
 
 async def test_around_reconfigure_updates_the_entry(hass: HomeAssistant) -> None:
