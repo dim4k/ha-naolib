@@ -53,6 +53,8 @@ DEFAULT_UPDATE_INTERVAL: int = 60
 MIN_UPDATE_INTERVAL: int = 30
 MAX_UPDATE_INTERVAL: int = 600
 API_TIMEOUT: int = 20
+# The public SIRI endpoint allows one request every 30 seconds per IP.
+API_MIN_SPACING: int = 31
 
 # Naolib / Okina real-time SIRI endpoint (keyless public access).
 # A single StopMonitoring request without MonitoringRef returns the whole
