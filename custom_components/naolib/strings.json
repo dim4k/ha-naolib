@@ -28,23 +28,22 @@
             },
             "by_location": {
                 "title": "Search around a location",
-                "description": "Pick a zone, or move the marker on the map, to search for nearby stops.",
+                "description": "Pick a zone to start from, or clear it to start from your home. The map opens on it next, where you can still move the marker.",
+                "data": {
+                    "zone": "Zone"
+                },
+                "data_description": {
+                    "zone": "The map opens on the centre of this zone."
+                }
+            },
+            "by_location_map": {
+                "title": "Adjust the position",
+                "description": "Move the marker if needed, then confirm to search for the nearby stops.",
                 "data": {
                     "location": "Location"
                 },
                 "data_description": {
-                    "location": "Move the marker to the area where you want to look for stops. Defaults to your home location."
-                },
-                "sections": {
-                    "zone_section": {
-                        "name": "Search around a zone",
-                        "data": {
-                            "zone": "Zone"
-                        },
-                        "data_description": {
-                            "zone": "The search starts from the centre of the zone. Ignored if you move the marker on the map below."
-                        }
-                    }
+                    "location": "The search starts from the marker."
                 }
             },
             "select_stop": {
@@ -59,23 +58,22 @@
             },
             "bike_by_location": {
                 "title": "Search around a location",
-                "description": "Pick a zone, or move the marker on the map, to search for nearby bike stations.",
+                "description": "Pick a zone to start from, or clear it to start from your home. The map opens on it next, where you can still move the marker.",
+                "data": {
+                    "zone": "Zone"
+                },
+                "data_description": {
+                    "zone": "The map opens on the centre of this zone."
+                }
+            },
+            "bike_by_location_map": {
+                "title": "Adjust the position",
+                "description": "Move the marker if needed, then confirm to search for the nearby bike stations.",
                 "data": {
                     "location": "Location"
                 },
                 "data_description": {
-                    "location": "Move the marker to the area where you want to look for stations. Defaults to your home location."
-                },
-                "sections": {
-                    "zone_section": {
-                        "name": "Search around a zone",
-                        "data": {
-                            "zone": "Zone"
-                        },
-                        "data_description": {
-                            "zone": "The search starts from the centre of the zone. Ignored if you move the marker on the map below."
-                        }
-                    }
+                    "location": "The search starts from the marker."
                 }
             },
             "select_station": {

@@ -1,13 +1,12 @@
 """Config flow for the Naolib integration."""
 
+from collections import Counter
 import logging
-import math
 from typing import Any
 
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import section
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     EntitySelector,
@@ -37,7 +36,6 @@ from .const import (
     CONF_STOP_LABEL,
     CONF_UPDATE_INTERVAL,
     CONF_ZONE,
-    CONF_ZONE_SECTION,
     DEFAULT_AROUND_MAX_STOPS,
     DEFAULT_AROUND_RADIUS,
     DEFAULT_UPDATE_INTERVAL,
@@ -70,6 +68,9 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self._stops: list[dict[str, Any]] = []
         self._stations: list[dict[str, Any]] = []
+        # Where the map opens: the centre of the zone picked on the previous
+        # page, or home.
+        self._map_center: dict[str, float] | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -99,51 +100,67 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _home(self) -> dict[str, float]:
-        """Return the home location, where the map marker starts."""
+        """Return the home location, where the map opens without a zone."""
         return {
             "latitude": self.hass.config.latitude,
             "longitude": self.hass.config.longitude,
         }
 
-    def _location_schema(self) -> vol.Schema:
-        """Build the position form: a zone first, then the map.
+    def _zone_schema(self) -> vol.Schema:
+        """Build the zone page, suggesting the home zone when it exists.
 
-        Forms cannot react to one field from another, so the precedence is
-        applied on submit (see ``_searched_point``) and explained in the text.
+        A suggested value (rather than a default) lets the user clear it and
+        start the map from home instead.
+        """
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_ZONE): EntitySelector(
+                    EntitySelectorConfig(domain="zone")
+                ),
+            }
+        )
+        if self.hass.states.get("zone.home") is None:
+            return schema
+        return self.add_suggested_values_to_schema(schema, {CONF_ZONE: "zone.home"})
+
+    def _map_schema(self) -> vol.Schema:
+        """Build the map page, centred on the zone picked before (or home).
+
+        Forms cannot react to one field from another, which is why the zone
+        and the map are two pages: the map then opens where the zone is.
         """
         return vol.Schema(
             {
-                vol.Optional(CONF_ZONE_SECTION, default={}): section(
-                    vol.Schema(
-                        {
-                            vol.Optional(CONF_ZONE): EntitySelector(
-                                EntitySelectorConfig(domain="zone")
-                            ),
-                        }
-                    ),
-                    {"collapsed": False},
-                ),
-                vol.Required(CONF_LOCATION, default=self._home()): LocationSelector(),
+                vol.Required(
+                    CONF_LOCATION, default=self._map_center or self._home()
+                ): LocationSelector(),
             }
         )
 
-    def _searched_point(self, user_input: dict[str, Any]) -> tuple[float, float] | None:
-        """Return the point to search around.
+    async def _async_step_zone(
+        self, step_id: str, user_input: dict[str, Any] | None
+    ) -> ConfigFlowResult | None:
+        """Show the zone page, or record where the map should open.
 
-        A picked zone is used unless the marker was moved away from home: a
-        moved marker is the more deliberate choice, so the zone is ignored.
-        None means the zone to use has no coordinates.
+        Returns the form to show, or None once the map centre is known.
         """
-        location = user_input[CONF_LOCATION]
-        home = self._home()
-        moved = not (
-            math.isclose(location["latitude"], home["latitude"], abs_tol=1e-6)
-            and math.isclose(location["longitude"], home["longitude"], abs_tol=1e-6)
-        )
-        zone = user_input.get(CONF_ZONE_SECTION, {}).get(CONF_ZONE)
-        if zone and not moved:
-            return self._zone_center(zone)
-        return location["latitude"], location["longitude"]
+        schema = self._zone_schema()
+        if user_input is None:
+            return self.async_show_form(step_id=step_id, data_schema=schema)
+
+        zone = user_input.get(CONF_ZONE)
+        if not zone:
+            self._map_center = self._home()
+            return None
+        center = self._zone_center(zone)
+        if center is None:
+            return self.async_show_form(
+                step_id=step_id,
+                data_schema=schema,
+                errors={"base": "zone_without_location"},
+            )
+        self._map_center = {"latitude": center[0], "longitude": center[1]}
+        return None
 
     def _zone_center(self, entity_id: str) -> tuple[float, float] | None:
         """Return the centre of a zone, or None if it has no coordinates."""
@@ -193,21 +210,26 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_by_location(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Search the stops around a point on the map, or around a zone."""
-        schema = self._location_schema()
-        if user_input is None:
-            return self.async_show_form(step_id="by_location", data_schema=schema)
+        """Pick a zone to start from; the map opens on it next."""
+        form = await self._async_step_zone("by_location", user_input)
+        return form or await self.async_step_by_location_map()
 
-        point = self._searched_point(user_input)
-        error = (
-            "zone_without_location"
-            if point is None
-            else await self._async_search_stops(*point)
+    async def async_step_by_location_map(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Search the stops around the marker, which starts on the zone."""
+        schema = self._map_schema()
+        if user_input is None:
+            return self.async_show_form(step_id="by_location_map", data_schema=schema)
+
+        location = user_input[CONF_LOCATION]
+        error = await self._async_search_stops(
+            location["latitude"], location["longitude"]
         )
         if error is None:
             return await self.async_step_select_stop()
         return self.async_show_form(
-            step_id="by_location", data_schema=schema, errors={"base": error}
+            step_id="by_location_map", data_schema=schema, errors={"base": error}
         )
 
     async def async_step_around(
@@ -308,21 +330,28 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_bike_by_location(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Search the bike stations around a point on the map, or a zone."""
-        schema = self._location_schema()
-        if user_input is None:
-            return self.async_show_form(step_id="bike_by_location", data_schema=schema)
+        """Pick a zone to start from; the map opens on it next."""
+        form = await self._async_step_zone("bike_by_location", user_input)
+        return form or await self.async_step_bike_by_location_map()
 
-        point = self._searched_point(user_input)
-        error = (
-            "zone_without_location"
-            if point is None
-            else await self._async_search_stations(*point)
+    async def async_step_bike_by_location_map(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Search the bike stations around the marker."""
+        schema = self._map_schema()
+        if user_input is None:
+            return self.async_show_form(
+                step_id="bike_by_location_map", data_schema=schema
+            )
+
+        location = user_input[CONF_LOCATION]
+        error = await self._async_search_stations(
+            location["latitude"], location["longitude"]
         )
         if error is None:
             return await self.async_step_select_station()
         return self.async_show_form(
-            step_id="bike_by_location", data_schema=schema, errors={"base": error}
+            step_id="bike_by_location_map", data_schema=schema, errors={"base": error}
         )
 
     async def async_step_select_station(
@@ -403,18 +432,11 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         ``custom_value`` is what makes Home Assistant render a picker that
         filters as you type; it also accepts free text, so a value that is not
-        one of the places is sent back with an error.
+        one of the places is sent back with an error. That picker shows the
+        raw value once an entry is picked, so the value is the label itself.
         """
         options = [
-            SelectOptionDict(
-                value=place["id"],
-                label=(
-                    f"{place['name']} ({place['distance']} m)"
-                    if "distance" in place
-                    else place["name"]
-                ),
-            )
-            for place in places
+            SelectOptionDict(value=label, label=label) for label in _labels(places)
         ]
         return self.async_show_form(
             step_id=step_id,
@@ -492,6 +514,29 @@ class NaolibOptionsFlow(OptionsFlow):
         )
 
 
-def _find(places: list[dict[str, Any]], place_id: str) -> dict[str, Any] | None:
-    """Return the place with this id among the ones offered, if any."""
-    return next((place for place in places if place["id"] == place_id), None)
+def _labels(places: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Give each place a unique label, in order: "Name (120 m)" or "Name".
+
+    A few stops share a name, so those labels get the stop number appended.
+    """
+    bases = [
+        f"{place['name']} ({place['distance']} m)"
+        if "distance" in place
+        else place["name"]
+        for place in places
+    ]
+    counts = Counter(bases)
+    return {
+        (
+            f"{base}, n°{place['id'].rsplit(':', 1)[-1]}" if counts[base] > 1 else base
+        ): place
+        for base, place in zip(bases, places, strict=True)
+    }
+
+
+def _find(places: list[dict[str, Any]], value: str) -> dict[str, Any] | None:
+    """Return the offered place picked by its label (or its id), if any."""
+    by_label = _labels(places)
+    if value in by_label:
+        return by_label[value]
+    return next((place for place in places if place["id"] == value), None)
