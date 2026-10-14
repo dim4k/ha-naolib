@@ -144,23 +144,34 @@ async def _async_get_departures(call: ServiceCall) -> ServiceResponse:
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:
     """Serve the card's files and load it on the frontend."""
-    integration = await async_get_integration(hass, DOMAIN)
-    path = hass.config.path("custom_components/naolib/www")
+    # Imported here so the frontend helpers stay out of the module imports.
+    from .frontend import WWW_PATH, async_register_loader
 
-    # The version in the URL acts as a cache-buster, so caching is safe and
-    # avoids the transient error shown while the card downloads.
+    integration = await async_get_integration(hass, DOMAIN)
+
+    # The card is imported under its content hash (stamped into the loader),
+    # so caching it is safe and avoids the transient error shown while the
+    # card downloads.
     await hass.http.async_register_static_paths(
-        [StaticPathConfig(url_path=CARD_URL_PATH, path=path, cache_headers=True)]
+        [
+            StaticPathConfig(
+                url_path=CARD_URL_PATH, path=str(WWW_PATH), cache_headers=True
+            )
+        ]
     )
 
-    loader_url = f"{CARD_URL_PATH}/{LOADER_FILENAME}?v={integration.version}"
+    # The loader itself is served at a fixed URL, uncached: an outdated page
+    # (service worker, mobile app cache) still runs the current one.
+    loader_url = await async_register_loader(hass, LOADER_FILENAME)
     hass.data[DOMAIN].loader_url = loader_url
 
     # What gets imported is the loader, not the card itself: Home Assistant
     # imports a custom card once per page load and never retries, so a single
     # transient failure would hide the card until the page is reloaded.
     add_extra_js_url(hass, loader_url)
-    _LOGGER.debug("Registered Naolib frontend module: %s", loader_url)
+    _LOGGER.debug(
+        "Registered Naolib %s frontend module: %s", integration.version, loader_url
+    )
 
 
 async def async_frontend_diagnostics(hass: HomeAssistant) -> dict[str, Any]:

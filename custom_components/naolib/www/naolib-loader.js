@@ -4,7 +4,8 @@
 
 // src/loader.js
 var CARD_URL = new URL(import.meta.url);
-CARD_URL.pathname = CARD_URL.pathname.replace(/[^/]*$/, "naolib-card.js");
+CARD_URL.pathname = "/naolib_static/naolib-card.js";
+CARD_URL.search = "?v=__NAOLIB_CARD_HASH__";
 var IMPORT_TIMEOUT_MS = 1e4;
 var APP_TIMEOUT_MS = 2e4;
 var pending = false;
