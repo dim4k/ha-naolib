@@ -55,8 +55,8 @@ class NaolibAroundController:
         self._radius = radius
         self._max_stops = max_stops
         self._interval = interval
-        # Stops the user unticked: never shown, and their slot goes to the next
-        # closest stop.
+        # Stops the user removed: hidden, without another stop taking their
+        # slot, so removing one of three nearby stops leaves two.
         self._excluded = set(excluded or [])
         self._catalog: list[dict[str, Any]] = []
         # Keyed by the coordinator key ``f"{entry_id}:{stop_code}"``.
@@ -66,8 +66,7 @@ class NaolibAroundController:
 
     async def async_start(self) -> None:
         """Load the catalogue, watch the entity and do a first computation."""
-        catalog = await self._hass.async_add_executor_job(load_stops)
-        self._catalog = [stop for stop in catalog if stop["id"] not in self._excluded]
+        self._catalog = await self._hass.async_add_executor_job(load_stops)
         self._entry.async_on_unload(
             async_track_state_change_event(
                 self._hass, [self._source_entity], self._handle_move
@@ -110,9 +109,13 @@ class NaolibAroundController:
         if coords is None:
             return
 
-        nearby = within(
-            self._catalog, coords[0], coords[1], self._radius, self._max_stops
-        )
+        nearby = [
+            stop
+            for stop in within(
+                self._catalog, coords[0], coords[1], self._radius, self._max_stops
+            )
+            if stop["id"] not in self._excluded
+        ]
         wanted = {f"{self._entry.entry_id}:{stop['id']}": stop for stop in nearby}
 
         new_entities: list[NaolibAroundDeparturesSensor] = []

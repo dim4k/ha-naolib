@@ -64,8 +64,8 @@ stops within a radius become sensors on their own, recomputed as the entity move
 phone's tracker turns into a live "stops near me" list. All of them read from the same shared
 network request, so following many stops still costs a single call.
 To hide a stop you never want, delete its device (from the device page, or with the cross on
-the screen shown after adding the entry): it never comes back, and the next closest stop takes
-its place.
+the screen shown after adding the entry): it never comes back, and no other stop takes its
+place, so keeping two of three nearby stops is just one removal.
 
 Entities are created right away; repeat to follow several stops or stations. The refresh
 interval (60 s by default, 30 to 600 s) is set from the **Configure** button. Deleting an
