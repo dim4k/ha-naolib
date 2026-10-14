@@ -216,7 +216,7 @@ async def test_unload_cancels_a_pending_recomputation(hass: HomeAssistant) -> No
 
 
 async def test_excluded_stops_are_never_shown(hass: HomeAssistant) -> None:
-    """An excluded stop is skipped and its slot goes to the next closest one."""
+    """An excluded stop is hidden, and no other stop takes its slot."""
     _at(hass, _LAT, _LON)
     reference = _entry()
     await _setup(hass, reference)
@@ -236,7 +236,8 @@ async def test_excluded_stops_are_never_shown(hass: HomeAssistant) -> None:
         key.split(":", 1)[1] for key in _own_stops(hass.data[DOMAIN].coordinator, entry)
     }
     assert excluded not in codes
-    assert len(codes) == len(nearest)
+    assert len(codes) == len(nearest) - 1
+    assert codes == {key.split(":", 1)[1] for key in nearest[1:]}
 
 
 async def test_sensors_expose_the_source_and_distance(hass: HomeAssistant) -> None:
@@ -297,7 +298,7 @@ async def test_deleting_a_stop_device_excludes_it(
     assert entry.data[CONF_EXCLUDED_STOPS] == [code]
     coordinator = hass.data[DOMAIN].coordinator
     assert f"{entry.entry_id}:{code}" not in coordinator.stops
-    assert _own_stops(coordinator, entry)  # another stop took its place
+    assert len(_own_stops(coordinator, entry)) == 4  # one fewer, no replacement
 
 
 async def test_stop_devices_of_other_entries_cannot_be_deleted(
