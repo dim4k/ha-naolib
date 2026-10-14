@@ -1,4 +1,5 @@
 import { DEFAULT_CONFIG, MAX_LINES_LIMIT, MAX_WALK_TIME } from "./config.js";
+import { directionLabel, directionTermini } from "./directions.js";
 import { isDepartureEntity, matchingEntities } from "./entities.js";
 import { NaolibFormEditor } from "./form-editor.js";
 
@@ -22,6 +23,25 @@ const HELPERS = {
         + "En mode compact, nombre maximum de départs affichés.",
     compact: "Une ligne par départ, sans regroupement par direction.",
 };
+
+// Timetables by stop code, fetched once per stop: they name the termini even
+// when nothing runs right now.
+const timetablesByStop = new Map();
+
+// Each direction is named after the termini of the lines the card shows.
+function directionOptions(hass, config) {
+    const attributes = hass.states[config.entity]?.attributes;
+    const termini = directionTermini(
+        timetablesByStop.get(attributes?.stop_code),
+        attributes?.next_departures,
+        config.lines,
+    );
+    return [
+        { value: "0", label: "Les deux" },
+        { value: "1", label: directionLabel(termini, 1) },
+        { value: "2", label: directionLabel(termini, 2) },
+    ];
+}
 
 // The available lines are read from the selected entity, so the picker offers
 // what actually passes at this stop instead of the whole network.
@@ -71,11 +91,7 @@ function buildSchema(hass, config) {
             selector: {
                 select: {
                     mode: "dropdown",
-                    options: [
-                        { value: "0", label: "Les deux" },
-                        { value: "1", label: "Direction 1" },
-                        { value: "2", label: "Direction 2" },
-                    ],
+                    options: directionOptions(hass, config),
                 },
             },
         },
@@ -123,5 +139,27 @@ export class NaolibCardEditor extends NaolibFormEditor {
 
     fromFormData(config, value) {
         return { ...config, ...value, direction: Number(value.direction ?? 0) };
+    }
+
+    _render() {
+        this._fetchTimetable();
+        super._render();
+    }
+
+    // Fetch the stop's timetable once, then draw the form again with it.
+    _fetchTimetable() {
+        const stopCode = this._hass?.states[this._config?.entity]?.attributes
+            ?.stop_code;
+        if (!stopCode || timetablesByStop.has(stopCode)) return;
+        timetablesByStop.set(stopCode, undefined);
+        this._hass
+            .callWS({ type: "naolib/get_data", stop_code: stopCode })
+            .then((data) => {
+                timetablesByStop.set(stopCode, data?.schedules || {});
+                super._render();
+            })
+            .catch(() => {
+                // The next departures still name the termini they serve.
+            });
     }
 }
