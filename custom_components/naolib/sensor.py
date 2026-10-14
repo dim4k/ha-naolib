@@ -133,6 +133,11 @@ class NaolibNextDeparturesSensor(
         }
 
 
+def around_device_identifier(entry_id: str, stop_code: str) -> tuple[str, str]:
+    """Return the device identifier of a stop shown by an "around me" entry."""
+    return (DOMAIN, f"around_{entry_id}_{stop_code}")
+
+
 class NaolibAroundDeparturesSensor(NaolibNextDeparturesSensor):
     """A nearby-stop sensor created on the fly by an "around me" entry.
 
@@ -150,7 +155,7 @@ class NaolibAroundDeparturesSensor(NaolibNextDeparturesSensor):
         super().__init__(coordinator, stop)
         self._attr_unique_id = f"naolib_around_{entry_id}_{stop.code}_next"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"around_{entry_id}_{stop.code}")},
+            identifiers={around_device_identifier(entry_id, stop.code)},
             name=f"Arrêt {stop.name}",
             manufacturer="Naolib",
             model="Arrêt",

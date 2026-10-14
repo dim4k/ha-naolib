@@ -17,12 +17,13 @@ from homeassistant.core import (
     HomeAssistant,
     callback,
 )
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 
 from .const import AROUND_DEBOUNCE
 from .coordinator import NaolibGlobalCoordinator, NaolibStop
-from .sensor import NaolibAroundDeparturesSensor
+from .sensor import NaolibAroundDeparturesSensor, around_device_identifier
 from .stops import load_stops, within
 
 if TYPE_CHECKING:
@@ -132,9 +133,14 @@ class NaolibAroundController:
                 continue
             self._coordinator.unregister_stop(key)
             del self._stops[key]
-            # _stops and _entities are kept in lock-step, so the entity exists.
-            entity = self._entities.pop(key)
-            self._hass.async_create_task(entity.async_remove())
+            del self._entities[key]
+
+        self._remove_stale_devices(
+            {
+                around_device_identifier(self._entry.entry_id, stop["id"])
+                for stop in nearby
+            }
+        )
 
         if new_entities:
             self._async_add_entities(new_entities)
@@ -145,6 +151,20 @@ class NaolibAroundController:
                 self._coordinator.async_request_refresh(),
                 "naolib_around_refresh",
             )
+
+    @callback
+    def _remove_stale_devices(self, wanted: set[tuple[str, str]]) -> None:
+        """Drop the devices of the stops that are no longer nearby.
+
+        Removing the device also removes its entity, so a stop that left the
+        radius (now or while Home Assistant was stopped) leaves nothing behind.
+        """
+        device_registry = dr.async_get(self._hass)
+        for device in dr.async_entries_for_config_entry(
+            device_registry, self._entry.entry_id
+        ):
+            if not device.identifiers & wanted:
+                device_registry.async_remove_device(device.id)
 
     @callback
     def _cleanup(self) -> None:
