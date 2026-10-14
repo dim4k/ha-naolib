@@ -2,7 +2,156 @@
  * Sources live in src/; run `npm run build` after any change.
  */
 
+// src/flow-devices.js
+var FLOW_DIALOG = "dialog-data-entry-flow";
+var CREATE_ENTRY_STEP = "step-flow-create-entry";
+var POLL_MS = 300;
+var MAX_POLL_MS = 10 * 60 * 1e3;
+function aroundStopDeviceIds(devices, entryId) {
+  const prefix = `around_${entryId}_`;
+  return new Set(
+    (devices || []).filter(
+      (device) => (device.identifiers || []).some(
+        ([domain, id]) => domain === "naolib" && String(id).startsWith(prefix)
+      )
+    ).map((device) => device.id)
+  );
+}
+function findAll(root, localName, found = []) {
+  if (!root) return found;
+  if (root.localName === localName) found.push(root);
+  if (root.shadowRoot) findAll(root.shadowRoot, localName, found);
+  for (const child of root.children || []) findAll(child, localName, found);
+  return found;
+}
+function removeButton(row, step, entryId) {
+  const button = document.createElement("ha-icon-button");
+  button.dataset.naolibRemove = "1";
+  button.label = "Retirer cet arrêt";
+  button.title = "Retirer cet arrêt";
+  button.style.cssText = "position: absolute; top: 0; right: 0;";
+  const icon = document.createElement("ha-icon");
+  icon.icon = "mdi:close";
+  button.appendChild(icon);
+  button.addEventListener("click", async () => {
+    const deviceId = row.querySelector("ha-area-picker")?.device;
+    if (!deviceId) return;
+    button.disabled = true;
+    try {
+      await step.hass.callWS({
+        type: "config/device_registry/remove_config_entry",
+        config_entry_id: entryId,
+        device_id: deviceId
+      });
+    } catch (err) {
+      console.error("Naolib: cannot remove the stop", err);
+      button.disabled = false;
+    }
+  });
+  return button;
+}
+function decorate(step) {
+  const entryId = step.step?.result?.entry_id;
+  if (step.step?.handler !== "naolib" || !entryId || !step.shadowRoot) return;
+  const ids = aroundStopDeviceIds(step.devices, entryId);
+  for (const row of step.shadowRoot.querySelectorAll("div.device")) {
+    const deviceId = row.querySelector("ha-area-picker")?.device;
+    let button = row.querySelector(":scope > [data-naolib-remove]");
+    if (!ids.has(deviceId)) {
+      button?.remove();
+      continue;
+    }
+    if (!button) {
+      row.style.position = "relative";
+      button = removeButton(row, step, entryId);
+      row.appendChild(button);
+    }
+    if (button.naolibDevice !== deviceId) {
+      button.naolibDevice = deviceId;
+      button.disabled = false;
+    }
+  }
+}
+var polling = null;
+function watchFlowDialog() {
+  if (polling) return;
+  const started = Date.now();
+  let seen = false;
+  polling = setInterval(() => {
+    const app = document.querySelector("home-assistant");
+    const open = findAll(app, FLOW_DIALOG).length > 0;
+    seen || (seen = open);
+    if (seen && !open || Date.now() - started > MAX_POLL_MS) {
+      clearInterval(polling);
+      polling = null;
+      return;
+    }
+    for (const step of findAll(app, CREATE_ENTRY_STEP)) decorate(step);
+  }, POLL_MS);
+}
+var installed = false;
+function installDeviceRemoval(target = window) {
+  if (installed) return;
+  installed = true;
+  target.addEventListener(
+    "show-dialog",
+    (event) => {
+      if (event.detail?.dialogTag === FLOW_DIALOG) watchFlowDialog();
+    },
+    true
+  );
+}
+
+// src/flow-zone.js
+var POSITION_STEPS = /* @__PURE__ */ new Set(["by_location", "bike_by_location"]);
+var ZONE_FIELD = "zone";
+function isPositionStep(step) {
+  return step?.handler === "naolib" && POSITION_STEPS.has(step.step_id);
+}
+function zoneLocation(hass, zoneId) {
+  const attributes = hass?.states?.[zoneId]?.attributes;
+  const latitude = attributes?.latitude;
+  const longitude = attributes?.longitude;
+  if (typeof latitude !== "number" || typeof longitude !== "number") return null;
+  return { latitude, longitude };
+}
+function withZoneLocation(hass, value, zoneId) {
+  if (!zoneId || !value || typeof value !== "object") return null;
+  const location = zoneLocation(hass, zoneId);
+  if (!location) return null;
+  return { ...value, location: { ...value.location || {}, ...location } };
+}
+var pickedZone = /* @__PURE__ */ new WeakMap();
+function onValueChanged(event) {
+  const path = event.composedPath();
+  const formIndex = path.findIndex((el) => el?.localName === "ha-form");
+  if (formIndex < 0) return;
+  const flow = path.find((el) => el?.localName === "step-flow-form");
+  if (!flow || !isPositionStep(flow.step)) return;
+  const form = path[formIndex];
+  if (formIndex > 0) {
+    const field = path.slice(0, formIndex).find((el) => typeof el?.schema?.name === "string");
+    if (field?.schema.name === ZONE_FIELD) {
+      pickedZone.set(form, event.detail?.value);
+    }
+    return;
+  }
+  if (!pickedZone.has(form)) return;
+  const zoneId = pickedZone.get(form);
+  pickedZone.delete(form);
+  const value = withZoneLocation(flow.hass, event.detail?.value, zoneId);
+  if (value) event.detail.value = value;
+}
+var installed2 = false;
+function installZoneFollower(target = document) {
+  if (installed2) return;
+  installed2 = true;
+  target.addEventListener("value-changed", onValueChanged, true);
+}
+
 // src/loader.js
+installZoneFollower();
+installDeviceRemoval();
 var CARD_URL = new URL(import.meta.url);
 CARD_URL.pathname = CARD_URL.pathname.replace(/[^/]*$/, "naolib-card.js");
 var IMPORT_TIMEOUT_MS = 1e4;

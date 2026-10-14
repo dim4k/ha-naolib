@@ -176,7 +176,8 @@ async def _async_get_json(
             url, timeout=aiohttp.ClientTimeout(total=API_TIMEOUT)
         ) as response:
             response.raise_for_status()
-            return await response.json(content_type=None)
+            document: dict[str, Any] = await response.json(content_type=None)
+            return document
     except (aiohttp.ClientError, TimeoutError, ValueError) as exception:
         _LOGGER.debug("GBFS request to %s failed: %s", url, exception)
         return None

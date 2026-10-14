@@ -11,14 +11,20 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.naolib.bike import GbfsUnavailableError
 from custom_components.naolib.const import (
     CONF_ENTRY_TYPE,
+    CONF_EXCLUDED_STOPS,
     CONF_LOCATION,
+    CONF_MAX_STOPS,
     CONF_QUAYS,
+    CONF_RADIUS,
+    CONF_SOURCE_ENTITY,
     CONF_STATION_ID,
     CONF_STATION_LABEL,
     CONF_STOP_CODE,
     CONF_STOP_LABEL,
     CONF_UPDATE_INTERVAL,
+    CONF_ZONE,
     DOMAIN,
+    ENTRY_TYPE_AROUND,
     ENTRY_TYPE_BIKE,
     ENTRY_TYPE_STOP,
 )
@@ -235,6 +241,106 @@ async def test_options_flow_sets_the_update_interval(hass: HomeAssistant) -> Non
     assert entry.options == {CONF_UPDATE_INTERVAL: 120}
 
 
+def _around_entry(entity_id: str = "person.me") -> MockConfigEntry:
+    return MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=f"around_{entity_id}",
+        title=f"Autour de : {entity_id}",
+        data={
+            CONF_ENTRY_TYPE: ENTRY_TYPE_AROUND,
+            CONF_SOURCE_ENTITY: entity_id,
+            CONF_RADIUS: 500,
+            CONF_MAX_STOPS: 5,
+        },
+    )
+
+
+async def test_around_flow_creates_the_entry(hass: HomeAssistant) -> None:
+    """Picking a tracked entity creates an "around me" entry."""
+    hass.states.async_set(
+        "person.me", "home", {"friendly_name": "Me", "latitude": 1.0, "longitude": 2.0}
+    )
+
+    result = await _menu(hass, "stop", "around")
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "around"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_SOURCE_ENTITY: "person.me", CONF_RADIUS: 600, CONF_MAX_STOPS: 3},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Autour de : Me"
+    assert result["data"] == {
+        CONF_ENTRY_TYPE: ENTRY_TYPE_AROUND,
+        CONF_SOURCE_ENTITY: "person.me",
+        CONF_RADIUS: 600,
+        CONF_MAX_STOPS: 3,
+        CONF_EXCLUDED_STOPS: [],
+    }
+
+
+async def test_around_reconfigure_keeps_the_exclusions(hass: HomeAssistant) -> None:
+    """Stops removed before stay removed after a reconfiguration."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="around_person.me",
+        title="Autour de : person.me",
+        data={**_around_entry("person.me").data, CONF_EXCLUDED_STOPS: ["STOP2"]},
+    )
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_SOURCE_ENTITY: "person.me", CONF_RADIUS: 800, CONF_MAX_STOPS: 4},
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_EXCLUDED_STOPS] == ["STOP2"]
+    assert entry.data[CONF_RADIUS] == 800
+
+
+async def test_around_names_an_unknown_entity_by_its_id(
+    hass: HomeAssistant,
+) -> None:
+    """An entity without a state is named after its id."""
+    result = await _menu(hass, "stop", "around")
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_SOURCE_ENTITY: "person.ghost", CONF_RADIUS: 500, CONF_MAX_STOPS: 5},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Autour de : person.ghost"
+    assert result["data"][CONF_EXCLUDED_STOPS] == []
+
+
+async def test_around_reconfigure_updates_the_entry(hass: HomeAssistant) -> None:
+    """Reconfiguring an "around me" entry moves it to another entity."""
+    entry = _around_entry("person.me")
+    entry.add_to_hass(hass)
+    hass.states.async_set(
+        "person.other", "home", {"friendly_name": "Other", "latitude": 1.0}
+    )
+
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "around"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_SOURCE_ENTITY: "person.other", CONF_RADIUS: 400, CONF_MAX_STOPS: 2},
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_SOURCE_ENTITY] == "person.other"
+    assert entry.unique_id == "around_person.other"
+
+
 def _bike_entry(station_id: str = "1") -> MockConfigEntry:
     return MockConfigEntry(
         domain=DOMAIN,
@@ -420,3 +526,186 @@ async def test_reconfigure_of_a_legacy_stop_stays_on_the_stop_branch(
     result = await entry.start_reconfigure_flow(hass)
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "stop"
+
+
+def _set_zone(hass: HomeAssistant, entity_id: str = "zone.home", **coords) -> None:
+    """Create a zone state, centred on Bouffay unless told otherwise."""
+    attributes = {"latitude": 47.2150, "longitude": -1.5530, "radius": 100}
+    attributes.update(coords)
+    hass.states.async_set(entity_id, "0", attributes)
+
+
+def _position(
+    hass: HomeAssistant, zone: str | None = None, moved: bool = False
+) -> dict:
+    """Submit the position page: a zone, and the marker at home or moved."""
+    home = {"latitude": hass.config.latitude, "longitude": hass.config.longitude}
+    data: dict = {CONF_LOCATION: dict(_LOCATION[CONF_LOCATION]) if moved else home}
+    if zone is not None:
+        data[CONF_ZONE] = zone
+    return data
+
+
+async def _searched_from(hass: HomeAssistant, flow_id: str, data: dict) -> tuple:
+    """Submit the position page and return where the stops were searched."""
+    with patch(
+        "custom_components.naolib.config_flow.nearby_stops", return_value=_STOPS
+    ) as search:
+        await hass.config_entries.flow.async_configure(flow_id, data)
+    return search.call_args.args
+
+
+async def test_the_zone_comes_first_on_the_position_page(hass: HomeAssistant) -> None:
+    """The zone is listed before the map, with the home zone suggested."""
+    _set_zone(hass)
+    result = await _start(hass)
+
+    keys = list(result["data_schema"].schema)
+    assert keys == [CONF_ZONE, CONF_LOCATION]
+    assert keys[0].description == {"suggested_value": "zone.home"}
+
+
+async def test_the_marker_is_searched_from(hass: HomeAssistant) -> None:
+    """The marker wins when it is not at home, zone or not."""
+    _set_zone(hass)
+    result = await _start(hass)
+
+    assert await _searched_from(
+        hass, result["flow_id"], _position(hass, zone="zone.home", moved=True)
+    ) == (47.2143, -1.5595)
+
+
+async def test_a_zone_is_used_when_the_marker_stayed_home(hass: HomeAssistant) -> None:
+    """Without the frontend helper the marker stays home: the zone is used."""
+    _set_zone(hass)
+    result = await _start(hass)
+
+    assert await _searched_from(
+        hass, result["flow_id"], _position(hass, zone="zone.home")
+    ) == (47.2150, -1.5530)
+
+
+async def test_without_a_zone_home_is_searched(hass: HomeAssistant) -> None:
+    """No zone and an untouched marker search around home."""
+    result = await _start(hass)
+
+    assert await _searched_from(hass, result["flow_id"], _position(hass)) == (
+        hass.config.latitude,
+        hass.config.longitude,
+    )
+
+
+@pytest.mark.parametrize("kind", ["stop", "bike"])
+@pytest.mark.parametrize("attributes", [{}, None])
+async def test_a_zone_without_coordinates_is_reported(
+    hass: HomeAssistant, kind: str, attributes: dict | None
+) -> None:
+    """A zone without coordinates, or gone, keeps the user on the page."""
+    if attributes is not None:
+        hass.states.async_set("zone.nowhere", "0", attributes)
+    step = "by_location" if kind == "stop" else "bike_by_location"
+    result = await _menu(hass, kind, step)
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], _position(hass, zone="zone.nowhere")
+    )
+
+    assert result["step_id"] == step
+    assert result["errors"] == {"base": "zone_without_location"}
+
+
+async def test_bike_zone_search_creates_the_entry(hass: HomeAssistant) -> None:
+    """Bike stations are searched around a zone too."""
+    _set_zone(hass)
+    result = await _menu(hass, "bike", "bike_by_location")
+
+    with _patch_stations(_STATIONS):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _position(hass, zone="zone.home")
+        )
+    assert result["step_id"] == "select_station"
+
+    options = next(iter(result["data_schema"].schema.values())).config["options"]
+    commerce = next(o["value"] for o in options if o["value"].startswith("COMMERCE"))
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_STATION_ID: commerce}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_STATION_ID] == "2"
+
+
+async def test_options_show_labels_as_values(hass: HomeAssistant) -> None:
+    """The picker shows the raw value once picked, so values are the labels."""
+    result = await _start(hass)
+    result = await _search(hass, result["flow_id"], _STOPS)
+
+    selector = next(iter(result["data_schema"].schema.values()))
+    assert [option["value"] for option in selector.config["options"]] == [
+        "Commerce (42 m)",
+        "Bouffay (300 m)",
+    ]
+    assert all(
+        option["value"] == option["label"] for option in selector.config["options"]
+    )
+
+
+async def test_homonym_stops_get_their_number(hass: HomeAssistant) -> None:
+    """Stops sharing a name are told apart by their number."""
+    homonyms = [
+        {"id": "FR_NAOLIB:StopPlace:152", "name": "Pinier", "quays": ["Q1"]},
+        {"id": "FR_NAOLIB:StopPlace:1076", "name": "Pinier", "quays": ["Q2"]},
+    ]
+    with patch(
+        "custom_components.naolib.config_flow.load_stops", return_value=homonyms
+    ):
+        result = await _menu(hass, "stop", "by_list")
+
+    selector = next(iter(result["data_schema"].schema.values()))
+    assert [option["value"] for option in selector.config["options"]] == [
+        "Pinier, n°152",
+        "Pinier, n°1076",
+    ]
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_STOP_CODE: "Pinier, n°1076"}
+    )
+    assert result["data"][CONF_STOP_CODE] == "FR_NAOLIB:StopPlace:1076"
+
+
+async def test_the_selection_list_is_searchable(hass: HomeAssistant) -> None:
+    """``custom_value`` makes the frontend render a type-to-filter picker."""
+    result = await _start(hass)
+    result = await _search(hass, result["flow_id"], _STOPS)
+
+    selector = next(iter(result["data_schema"].schema.values()))
+    assert selector.config["custom_value"] is True
+
+
+async def test_typed_text_must_match_a_stop(hass: HomeAssistant) -> None:
+    """Free text that is not one of the stops is sent back with an error."""
+    result = await _start(hass)
+    result = await _search(hass, result["flow_id"], _STOPS)
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_STOP_CODE: "Ai"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "select_stop"
+    assert result["errors"] == {"base": "not_in_list"}
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_STOP_CODE: "STOP2"}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_typed_text_must_match_a_station(hass: HomeAssistant) -> None:
+    """Free text that is not one of the stations is sent back with an error."""
+    with _patch_stations(_STATIONS):
+        result = await _menu(hass, "bike", "bike_by_list")
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_STATION_ID: "nowhere"}
+    )
+    assert result["step_id"] == "select_station"
+    assert result["errors"] == {"base": "not_in_list"}
