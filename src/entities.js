@@ -36,23 +36,22 @@ export function matchingEntities(hass, predicate, current) {
     return ids;
 }
 
-// A nearby-stop sensor of an "around me" entry: a departures sensor that
-// also names the entity it follows.
-export function isAroundEntity(state) {
-    return isDepartureEntity(state) && typeof state.attributes.around_source === "string";
-}
+// What the "around me" card can follow: a person, zone or device tracker
+// that has GPS coordinates.
+const LOCATABLE_DOMAINS = ["person", "zone", "device_tracker"];
 
-// The entities followed by an "around me" entry, in a stable order.
-export function aroundSources(hass) {
-    const sources = new Set();
-    for (const state of Object.values(hass?.states || {})) {
-        if (isAroundEntity(state)) sources.add(state.attributes.around_source);
-    }
-    return [...sources].sort();
-}
-
-export function aroundSensors(hass, source) {
-    return Object.values(hass?.states || {}).filter(
-        (state) => isAroundEntity(state) && state.attributes.around_source === source,
+export function isLocatable(entityId, state) {
+    return (
+        LOCATABLE_DOMAINS.includes(String(entityId).split(".")[0]) &&
+        typeof state?.attributes?.latitude === "number" &&
+        typeof state?.attributes?.longitude === "number"
     );
+}
+
+// The default entity of a new card: a person if there is one.
+export function firstLocatable(hass) {
+    const ids = Object.keys(hass?.states || {})
+        .filter((entityId) => isLocatable(entityId, hass.states[entityId]))
+        .sort();
+    return ids.find((entityId) => entityId.startsWith("person.")) || ids[0];
 }

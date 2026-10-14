@@ -42,8 +42,10 @@ export function renderAround(stops) {
     return `<div class="around">${stops.map(stopHtml).join("")}</div>`;
 }
 
-// Either no entry follows this entity, or no stop is in its radius (or it has
-// no position yet): the card cannot tell them apart, so it names both.
-export function noStopsMessage(name) {
-    return `Aucun arrêt pour ${esc(name)}. Vérifiez qu'une entrée Naolib « autour de moi » suit cette entité (Paramètres &gt; Appareils et services) ; le rayon et le nombre d'arrêts s'y règlent.`;
+export function notLocatedMessage(name) {
+    return `La position de ${esc(name)} est inconnue : il faut une personne, une zone ou un traceur avec des coordonnées GPS.`;
+}
+
+export function noStopsMessage(name, radius) {
+    return `Aucun arrêt dans un rayon de ${esc(String(radius))} m autour de ${esc(name)}.`;
 }
