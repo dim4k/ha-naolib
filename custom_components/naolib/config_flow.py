@@ -1,17 +1,22 @@
 """Config flow for the Naolib integration."""
 
 import logging
+import math
 from typing import Any
 
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
     LocationSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -28,6 +33,8 @@ from .const import (
     CONF_STOP_CODE,
     CONF_STOP_LABEL,
     CONF_UPDATE_INTERVAL,
+    CONF_ZONE,
+    CONF_ZONE_SECTION,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     ENTRY_TYPE_BIKE,
@@ -81,19 +88,86 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             menu_options=["bike_by_list", "bike_by_location"],
         )
 
-    def _location_schema(self) -> vol.Schema:
-        """Build the map form, centred on the home location."""
-        default_location = {
+    def _home(self) -> dict[str, float]:
+        """Return the home location, where the map marker starts."""
+        return {
             "latitude": self.hass.config.latitude,
             "longitude": self.hass.config.longitude,
         }
+
+    def _location_schema(self) -> vol.Schema:
+        """Build the position form: a zone first, then the map.
+
+        Forms cannot react to one field from another, so the precedence is
+        applied on submit (see ``_searched_point``) and explained in the text.
+        """
         return vol.Schema(
             {
-                vol.Required(
-                    CONF_LOCATION, default=default_location
-                ): LocationSelector(),
+                vol.Optional(CONF_ZONE_SECTION, default={}): section(
+                    vol.Schema(
+                        {
+                            vol.Optional(CONF_ZONE): EntitySelector(
+                                EntitySelectorConfig(domain="zone")
+                            ),
+                        }
+                    ),
+                    {"collapsed": False},
+                ),
+                vol.Required(CONF_LOCATION, default=self._home()): LocationSelector(),
             }
         )
+
+    def _searched_point(self, user_input: dict[str, Any]) -> tuple[float, float] | None:
+        """Return the point to search around.
+
+        A picked zone is used unless the marker was moved away from home: a
+        moved marker is the more deliberate choice, so the zone is ignored.
+        None means the zone to use has no coordinates.
+        """
+        location = user_input[CONF_LOCATION]
+        home = self._home()
+        moved = not (
+            math.isclose(location["latitude"], home["latitude"], abs_tol=1e-6)
+            and math.isclose(location["longitude"], home["longitude"], abs_tol=1e-6)
+        )
+        zone = user_input.get(CONF_ZONE_SECTION, {}).get(CONF_ZONE)
+        if zone and not moved:
+            return self._zone_center(zone)
+        return location["latitude"], location["longitude"]
+
+    def _zone_center(self, entity_id: str) -> tuple[float, float] | None:
+        """Return the centre of a zone, or None if it has no coordinates."""
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return None
+        latitude = state.attributes.get("latitude")
+        longitude = state.attributes.get("longitude")
+        if latitude is None or longitude is None:
+            return None
+        return float(latitude), float(longitude)
+
+    async def _async_search_stops(
+        self, latitude: float, longitude: float
+    ) -> str | None:
+        """Look for the stops around a point; return an error key, if any."""
+        try:
+            self._stops = await self.hass.async_add_executor_job(
+                nearby_stops, latitude, longitude
+            )
+        except Exception:
+            _LOGGER.exception("Failed to search for Naolib stops")
+            return "unknown"
+        return None if self._stops else "no_stops_found"
+
+    async def _async_search_stations(
+        self, latitude: float, longitude: float
+    ) -> str | None:
+        """Look for the bike stations around a point; return an error key."""
+        stations = await self._async_fetch_stations()
+        if stations is None:
+            return "cannot_connect"
+        self._stations = nearest(stations, latitude, longitude)
+        return None if self._stations else "no_stations_found"
 
     async def async_step_by_list(
         self, user_input: dict[str, Any] | None = None
@@ -109,27 +183,21 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_by_location(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Search the stops around a location picked on the map."""
+        """Search the stops around a point on the map, or around a zone."""
         schema = self._location_schema()
         if user_input is None:
             return self.async_show_form(step_id="by_location", data_schema=schema)
 
-        location = user_input[CONF_LOCATION]
-        errors: dict[str, str] = {}
-        try:
-            self._stops = await self.hass.async_add_executor_job(
-                nearby_stops, location["latitude"], location["longitude"]
-            )
-        except Exception:
-            _LOGGER.exception("Failed to search for Naolib stops")
-            errors["base"] = "unknown"
-        else:
-            if self._stops:
-                return await self.async_step_select_stop()
-            errors["base"] = "no_stops_found"
-
+        point = self._searched_point(user_input)
+        error = (
+            "zone_without_location"
+            if point is None
+            else await self._async_search_stops(*point)
+        )
+        if error is None:
+            return await self.async_step_select_stop()
         return self.async_show_form(
-            step_id="by_location", data_schema=schema, errors=errors
+            step_id="by_location", data_schema=schema, errors={"base": error}
         )
 
     async def _async_fetch_stations(self) -> list[dict[str, Any]] | None:
@@ -158,40 +226,38 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_bike_by_location(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Search the bike stations around a location picked on the map."""
+        """Search the bike stations around a point on the map, or a zone."""
         schema = self._location_schema()
         if user_input is None:
             return self.async_show_form(step_id="bike_by_location", data_schema=schema)
 
-        location = user_input[CONF_LOCATION]
-        errors: dict[str, str] = {}
-        stations = await self._async_fetch_stations()
-        if stations is None:
-            errors["base"] = "cannot_connect"
-        else:
-            self._stations = nearest(
-                stations, location["latitude"], location["longitude"]
-            )
-            if self._stations:
-                return await self.async_step_select_station()
-            errors["base"] = "no_stations_found"
-
+        point = self._searched_point(user_input)
+        error = (
+            "zone_without_location"
+            if point is None
+            else await self._async_search_stations(*point)
+        )
+        if error is None:
+            return await self.async_step_select_station()
         return self.async_show_form(
-            step_id="bike_by_location", data_schema=schema, errors=errors
+            step_id="bike_by_location", data_schema=schema, errors={"base": error}
         )
 
     async def async_step_select_station(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Choose a bike station among the ones just found."""
-        if user_input is None:
+        station = (
+            None
+            if user_input is None
+            else _find(self._stations, user_input[CONF_STATION_ID])
+        )
+        if station is None:
             return self._show_selection(
-                "select_station", CONF_STATION_ID, self._stations
+                "select_station", CONF_STATION_ID, self._stations, user_input
             )
 
-        station_id = user_input[CONF_STATION_ID]
-        # The selector only accepts one of the stations we just found.
-        station = next(s for s in self._stations if s["id"] == station_id)
+        station_id = station["id"]
         return await self._async_save(
             unique_id=f"{BIKE_UNIQUE_ID_PREFIX}{station_id}",
             title=f"Station vélo : {station['name']}",
@@ -219,12 +285,17 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Choose a stop among the ones just found."""
-        if user_input is None:
-            return self._show_selection("select_stop", CONF_STOP_CODE, self._stops)
+        stop = (
+            None
+            if user_input is None
+            else _find(self._stops, user_input[CONF_STOP_CODE])
+        )
+        if stop is None:
+            return self._show_selection(
+                "select_stop", CONF_STOP_CODE, self._stops, user_input
+            )
 
-        stop_code = user_input[CONF_STOP_CODE]
-        # The selector only accepts one of the stops we just found.
-        stop = next(s for s in self._stops if s["id"] == stop_code)
+        stop_code = stop["id"]
         return await self._async_save(
             unique_id=stop_code,
             title=f"Arrêt : {stop['name']}",
@@ -237,18 +308,27 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _show_selection(
-        self, step_id: str, key: str, places: list[dict[str, Any]]
+        self,
+        step_id: str,
+        key: str,
+        places: list[dict[str, Any]],
+        user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
-        """Offer the stops or stations just found in a searchable dropdown."""
+        """Offer the stops or stations just found in a searchable dropdown.
+
+        ``custom_value`` is what makes Home Assistant render a picker that
+        filters as you type; it also accepts free text, so a value that is not
+        one of the places is sent back with an error.
+        """
         options = [
-            {
-                "value": place["id"],
-                "label": (
+            SelectOptionDict(
+                value=place["id"],
+                label=(
                     f"{place['name']} ({place['distance']} m)"
                     if "distance" in place
                     else place["name"]
                 ),
-            }
+            )
             for place in places
         ]
         return self.async_show_form(
@@ -259,10 +339,12 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         SelectSelectorConfig(
                             options=options,
                             mode=SelectSelectorMode.DROPDOWN,
+                            custom_value=True,
                         )
                     ),
                 }
             ),
+            errors={"base": "not_in_list"} if user_input is not None else None,
         )
 
     async def _async_save(
@@ -323,3 +405,8 @@ class NaolibOptionsFlow(OptionsFlow):
                 }
             ),
         )
+
+
+def _find(places: list[dict[str, Any]], place_id: str) -> dict[str, Any] | None:
+    """Return the place with this id among the ones offered, if any."""
+    return next((place for place in places if place["id"] == place_id), None)

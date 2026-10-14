@@ -13,6 +13,8 @@ CONF_QUAYS: str = "quays"
 CONF_STATION_ID: str = "station_id"
 CONF_STATION_LABEL: str = "station_label"
 CONF_LOCATION: str = "location"
+CONF_ZONE: str = "zone"
+CONF_ZONE_SECTION: str = "zone_section"
 CONF_UPDATE_INTERVAL: str = "update_interval"
 
 # An entry either tracks a transit stop or a bike-sharing station. Entries

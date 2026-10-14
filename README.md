@@ -47,8 +47,10 @@ install, copy `custom_components/naolib` into `config/custom_components` and res
 [![Add integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=naolib)
 
 Add the **Naolib** integration, choose what to track — **a stop** (bus, tram, ferry) or **a
-bike station** — then pick it from the searchable list of the whole network, or on a map
-around a location (your home coordinates are pre-filled, distances included).
+bike station** — then pick it from the list of the whole network (type a few letters to
+filter it), or search around a position: a **zone** (such as your home), or a point on the
+**map** (your home coordinates are pre-filled). Moving the marker takes precedence over the
+zone; distances are shown.
 
 Entities are created right away; repeat to follow several stops or stations. The refresh
 interval (60 s by default, 30 to 600 s) is set from the **Configure** button. Deleting an
