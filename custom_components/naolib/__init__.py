@@ -293,9 +293,7 @@ def _remove_stale_devices(
     device_registry = dr.async_get(hass)
     for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
         if identifier not in device.identifiers:
-            device_registry.async_update_device(
-                device.id, remove_config_entry_id=entry.entry_id
-            )
+            device_registry.async_remove_device(device.id)
 
 
 def _schedule_refresh(
