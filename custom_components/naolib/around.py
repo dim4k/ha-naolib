@@ -131,10 +131,10 @@ class NaolibAroundController:
             if key in wanted:
                 continue
             self._coordinator.unregister_stop(key)
-            self._stops.pop(key, None)
-            entity = self._entities.pop(key, None)
-            if entity is not None:
-                self._hass.async_create_task(entity.async_remove())
+            del self._stops[key]
+            # _stops and _entities are kept in lock-step, so the entity exists.
+            entity = self._entities.pop(key)
+            self._hass.async_create_task(entity.async_remove())
 
         if new_entities:
             self._async_add_entities(new_entities)
