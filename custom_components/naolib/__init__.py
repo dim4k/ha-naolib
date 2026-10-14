@@ -31,6 +31,7 @@ from .const import (
     CARD_URL_PATH,
     CONF_ENTRY_TYPE,
     CONF_QUAYS,
+    CONF_SOURCE_ENTITY,
     CONF_STATION_ID,
     CONF_STATION_LABEL,
     CONF_STOP_CODE,
@@ -38,6 +39,7 @@ from .const import (
     CONF_UPDATE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    ENTRY_TYPE_AROUND,
     ENTRY_TYPE_BIKE,
     LOADER_FILENAME,
     MAX_TIMETABLE_DAY_OFFSET,
@@ -80,6 +82,11 @@ def _is_bike(entry: ConfigEntry) -> bool:
     Entries created before bike support have no type and are stops.
     """
     return entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_BIKE
+
+
+def _is_around(entry: ConfigEntry) -> bool:
+    """Tell whether an entry follows a tracked entity ("around me")."""
+    return entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_AROUND
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -178,6 +185,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bo
     if _is_bike(entry):
         if not await _async_setup_bike_entry(hass, entry):
             return False
+    elif _is_around(entry):
+        if not await _async_setup_around_entry(hass, entry):
+            return False
     elif not await _async_setup_stop_entry(hass, entry):
         return False
 
@@ -228,6 +238,27 @@ async def _async_setup_stop_entry(
     # added later needs a refresh too, since the snapshot only holds the quays
     # that were registered when it was taken; the debouncer collapses the
     # requests fired when several entries are set up at once.
+    _schedule_refresh(hass, entry, coordinator)
+    entry.runtime_data = coordinator
+    return True
+
+
+async def _async_setup_around_entry(
+    hass: HomeAssistant, entry: NaolibConfigEntry
+) -> bool:
+    """Set up an "around me" entry.
+
+    The nearby stops are registered on the shared coordinator by the sensor
+    platform's controller, which also follows the tracked entity's moves; here
+    we only validate the configuration and expose the coordinator as runtime
+    data so the platform can reach it.
+    """
+    coordinator = hass.data[DOMAIN].coordinator
+
+    if not entry.data.get(CONF_SOURCE_ENTITY):
+        _LOGGER.error("Tracked entity missing from configuration")
+        return False
+
     _schedule_refresh(hass, entry, coordinator)
     entry.runtime_data = coordinator
     return True
@@ -336,6 +367,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> b
     if unloaded:
         if _is_bike(entry):
             hass.data[DOMAIN].bike_coordinator.unregister_station(entry.entry_id)
+        elif _is_around(entry):
+            # The controller unregisters its stops via entry.async_on_unload.
+            pass
         else:
             hass.data[DOMAIN].coordinator.unregister_stop(entry.entry_id)
     return unloaded

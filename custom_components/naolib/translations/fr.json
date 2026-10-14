@@ -14,7 +14,8 @@
                 "description": "Comment souhaitez-vous choisir l'arrêt ?",
                 "menu_options": {
                     "by_list": "Choisir dans la liste",
-                    "by_location": "Chercher autour d'une position"
+                    "by_location": "Chercher autour d'une position",
+                    "around": "Autour d'une personne ou zone (en direct)"
                 }
             },
             "bike": {
@@ -85,6 +86,20 @@
                 },
                 "data_description": {
                     "station_id": "Saisissez quelques lettres pour filtrer la liste. La distance est affichée lors d'une recherche sur la carte."
+                }
+            },
+            "around": {
+                "title": "Autour d'une entité suivie",
+                "description": "Suivez une personne, une zone ou un traceur. Les arrêts dans le rayon deviennent des capteurs et se mettent à jour quand l'entité se déplace.",
+                "data": {
+                    "source_entity": "Entité suivie",
+                    "radius": "Rayon",
+                    "max_stops": "Nombre maximum d'arrêts"
+                },
+                "data_description": {
+                    "source_entity": "Personne, zone ou device_tracker à suivre (doit exposer des coordonnées GPS).",
+                    "radius": "Seuls les arrêts situés dans cette distance sont conservés.",
+                    "max_stops": "Au plus ce nombre d'arrêts les plus proches deviennent des capteurs."
                 }
             }
         },
