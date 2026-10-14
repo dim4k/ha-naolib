@@ -82,12 +82,7 @@ async def _menu(hass: HomeAssistant, kind: str, step: str) -> dict:
 
 async def _start(hass: HomeAssistant) -> dict:
     """Open the flow and pick the map search for a stop."""
-    return await _skip_zone(hass, await _menu(hass, "stop", "by_location"))
-
-
-async def _skip_zone(hass: HomeAssistant, result: dict) -> dict:
-    """Leave the zone page empty, so the map opens at home."""
-    return await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    return await _menu(hass, "stop", "by_location")
 
 
 async def _search(hass: HomeAssistant, flow_id: str, stops: list | Exception) -> dict:
@@ -104,7 +99,7 @@ async def test_user_flow_creates_the_entry(hass: HomeAssistant) -> None:
     """Picking a location then a stop creates the entry."""
     result = await _start(hass)
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "by_location_map"
+    assert result["step_id"] == "by_location"
 
     result = await _search(hass, result["flow_id"], _STOPS)
     assert result["type"] is FlowResultType.FORM
@@ -195,7 +190,6 @@ async def test_reconfigure_updates_the_entry(hass: HomeAssistant) -> None:
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"next_step_id": "by_location"}
     )
-    result = await _skip_zone(hass, result)
     result = await _search(hass, result["flow_id"], _STOPS)
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_STOP_CODE: "STOP2"}
@@ -219,7 +213,6 @@ async def test_reconfigure_rejects_a_stop_owned_by_another_entry(
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"next_step_id": "by_location"}
     )
-    result = await _skip_zone(hass, result)
     result = await _search(hass, result["flow_id"], _STOPS)
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_STOP_CODE: "STOP2"}
@@ -420,8 +413,8 @@ def _patch_stations(stations: list | Exception):
 
 async def test_bike_flow_creates_the_entry(hass: HomeAssistant) -> None:
     """Picking a location then a station creates a bike entry."""
-    result = await _skip_zone(hass, await _menu(hass, "bike", "bike_by_location"))
-    assert result["step_id"] == "bike_by_location_map"
+    result = await _menu(hass, "bike", "bike_by_location")
+    assert result["step_id"] == "bike_by_location"
 
     with _patch_stations(_STATIONS):
         result = await hass.config_entries.flow.async_configure(
@@ -479,7 +472,7 @@ async def test_bike_list_aborts_on_an_empty_feed(hass: HomeAssistant) -> None:
 
 async def test_no_station_nearby(hass: HomeAssistant) -> None:
     """An empty search keeps the user on the location form."""
-    result = await _skip_zone(hass, await _menu(hass, "bike", "bike_by_location"))
+    result = await _menu(hass, "bike", "bike_by_location")
 
     with _patch_stations([]):
         result = await hass.config_entries.flow.async_configure(
@@ -492,7 +485,7 @@ async def test_no_station_nearby(hass: HomeAssistant) -> None:
 
 async def test_bike_feed_failure_is_reported(hass: HomeAssistant) -> None:
     """An unreachable GBFS feed is surfaced instead of aborting the flow."""
-    result = await _skip_zone(hass, await _menu(hass, "bike", "bike_by_location"))
+    result = await _menu(hass, "bike", "bike_by_location")
 
     with _patch_stations(GbfsUnavailableError("boom")):
         result = await hass.config_entries.flow.async_configure(
@@ -507,7 +500,7 @@ async def test_already_configured_station(hass: HomeAssistant) -> None:
     """The same station cannot be added twice."""
     _bike_entry("1").add_to_hass(hass)
 
-    result = await _skip_zone(hass, await _menu(hass, "bike", "bike_by_location"))
+    result = await _menu(hass, "bike", "bike_by_location")
     with _patch_stations(_STATIONS):
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], _LOCATION
@@ -532,7 +525,6 @@ async def test_reconfigure_keeps_the_entry_kind(hass: HomeAssistant) -> None:
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"next_step_id": "bike_by_location"}
     )
-    result = await _skip_zone(hass, result)
     with _patch_stations(_STATIONS):
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], _LOCATION
@@ -559,7 +551,6 @@ async def test_reconfigure_rejects_a_station_owned_by_another_entry(
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"next_step_id": "bike_by_location"}
     )
-    result = await _skip_zone(hass, result)
     with _patch_stations(_STATIONS):
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], _LOCATION
@@ -592,71 +583,64 @@ def _set_zone(hass: HomeAssistant, entity_id: str = "zone.home", **coords) -> No
     hass.states.async_set(entity_id, "0", attributes)
 
 
-async def _zone_page(hass: HomeAssistant, kind: str = "stop") -> dict:
-    """Open the position page of a stop or bike flow."""
-    step = "by_location" if kind == "stop" else "bike_by_location"
-    return await _menu(hass, kind, step)
+def _position(
+    hass: HomeAssistant, zone: str | None = None, moved: bool = False
+) -> dict:
+    """Submit the position page: a zone, and the marker at home or moved."""
+    home = {"latitude": hass.config.latitude, "longitude": hass.config.longitude}
+    data: dict = {CONF_LOCATION: dict(_LOCATION[CONF_LOCATION]) if moved else home}
+    if zone is not None:
+        data[CONF_ZONE] = zone
+    return data
 
 
-async def test_the_zone_page_comes_first(hass: HomeAssistant) -> None:
-    """Searching around a location starts with a zone, home suggested."""
-    _set_zone(hass)
-    result = await _zone_page(hass)
-
-    assert result["step_id"] == "by_location"
-    key = next(iter(result["data_schema"].schema))
-    assert key == CONF_ZONE
-    assert key.description == {"suggested_value": "zone.home"}
-
-
-async def test_a_zone_centres_the_map(hass: HomeAssistant) -> None:
-    """The map opens on the centre of the zone picked before."""
-    _set_zone(hass)
-    result = await _zone_page(hass)
-
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ZONE: "zone.home"}
-    )
-
-    assert result["step_id"] == "by_location_map"
-    assert result["data_schema"]({})[CONF_LOCATION] == {
-        "latitude": 47.2150,
-        "longitude": -1.5530,
-    }
-
-
-async def test_without_a_zone_the_map_opens_at_home(hass: HomeAssistant) -> None:
-    """Leaving the zone empty opens the map on the home location."""
-    result = await _start(hass)
-
-    assert result["data_schema"]({})[CONF_LOCATION] == {
-        "latitude": hass.config.latitude,
-        "longitude": hass.config.longitude,
-    }
-
-
-async def test_zone_search_creates_the_entry(hass: HomeAssistant) -> None:
-    """Confirming the map opened on a zone searches from the marker."""
-    _set_zone(hass)
-    result = await _zone_page(hass)
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ZONE: "zone.home"}
-    )
-
+async def _searched_from(hass: HomeAssistant, flow_id: str, data: dict) -> tuple:
+    """Submit the position page and return where the stops were searched."""
     with patch(
         "custom_components.naolib.config_flow.nearby_stops", return_value=_STOPS
     ) as search:
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], result["data_schema"]({})
-        )
-    search.assert_called_once_with(47.2150, -1.5530)
-    assert result["step_id"] == "select_stop"
+        await hass.config_entries.flow.async_configure(flow_id, data)
+    return search.call_args.args
 
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_STOP_CODE: "Commerce (42 m)"}
+
+async def test_the_zone_comes_first_on_the_position_page(hass: HomeAssistant) -> None:
+    """The zone is listed before the map, with the home zone suggested."""
+    _set_zone(hass)
+    result = await _start(hass)
+
+    keys = list(result["data_schema"].schema)
+    assert keys == [CONF_ZONE, CONF_LOCATION]
+    assert keys[0].description == {"suggested_value": "zone.home"}
+
+
+async def test_the_marker_is_searched_from(hass: HomeAssistant) -> None:
+    """The marker wins when it is not at home, zone or not."""
+    _set_zone(hass)
+    result = await _start(hass)
+
+    assert await _searched_from(
+        hass, result["flow_id"], _position(hass, zone="zone.home", moved=True)
+    ) == (47.2143, -1.5595)
+
+
+async def test_a_zone_is_used_when_the_marker_stayed_home(hass: HomeAssistant) -> None:
+    """Without the frontend helper the marker stays home: the zone is used."""
+    _set_zone(hass)
+    result = await _start(hass)
+
+    assert await _searched_from(
+        hass, result["flow_id"], _position(hass, zone="zone.home")
+    ) == (47.2150, -1.5530)
+
+
+async def test_without_a_zone_home_is_searched(hass: HomeAssistant) -> None:
+    """No zone and an untouched marker search around home."""
+    result = await _start(hass)
+
+    assert await _searched_from(hass, result["flow_id"], _position(hass)) == (
+        hass.config.latitude,
+        hass.config.longitude,
     )
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"][CONF_STOP_CODE] == "STOP1"
 
 
 @pytest.mark.parametrize("kind", ["stop", "bike"])
@@ -664,35 +648,38 @@ async def test_zone_search_creates_the_entry(hass: HomeAssistant) -> None:
 async def test_a_zone_without_coordinates_is_reported(
     hass: HomeAssistant, kind: str, attributes: dict | None
 ) -> None:
-    """A zone without coordinates, or gone, keeps the user on the zone page."""
+    """A zone without coordinates, or gone, keeps the user on the page."""
     if attributes is not None:
         hass.states.async_set("zone.nowhere", "0", attributes)
-    result = await _zone_page(hass, kind)
+    step = "by_location" if kind == "stop" else "bike_by_location"
+    result = await _menu(hass, kind, step)
 
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ZONE: "zone.nowhere"}
+        result["flow_id"], _position(hass, zone="zone.nowhere")
     )
 
-    assert result["step_id"] == (
-        "by_location" if kind == "stop" else "bike_by_location"
-    )
+    assert result["step_id"] == step
     assert result["errors"] == {"base": "zone_without_location"}
 
 
-async def test_a_zone_centres_the_bike_map(hass: HomeAssistant) -> None:
-    """The bike flow opens its map on the zone too."""
+async def test_bike_zone_search_creates_the_entry(hass: HomeAssistant) -> None:
+    """Bike stations are searched around a zone too."""
     _set_zone(hass)
-    result = await _zone_page(hass, "bike")
+    result = await _menu(hass, "bike", "bike_by_location")
 
+    with _patch_stations(_STATIONS):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _position(hass, zone="zone.home")
+        )
+    assert result["step_id"] == "select_station"
+
+    options = next(iter(result["data_schema"].schema.values())).config["options"]
+    commerce = next(o["value"] for o in options if o["value"].startswith("COMMERCE"))
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ZONE: "zone.home"}
+        result["flow_id"], {CONF_STATION_ID: commerce}
     )
-
-    assert result["step_id"] == "bike_by_location_map"
-    assert result["data_schema"]({})[CONF_LOCATION] == {
-        "latitude": 47.2150,
-        "longitude": -1.5530,
-    }
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_STATION_ID] == "2"
 
 
 async def test_options_show_labels_as_values(hass: HomeAssistant) -> None:

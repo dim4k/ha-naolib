@@ -2,7 +2,55 @@
  * Sources live in src/; run `npm run build` after any change.
  */
 
+// src/flow-zone.js
+var POSITION_STEPS = /* @__PURE__ */ new Set(["by_location", "bike_by_location"]);
+var ZONE_FIELD = "zone";
+function isPositionStep(step) {
+  return step?.handler === "naolib" && POSITION_STEPS.has(step.step_id);
+}
+function zoneLocation(hass, zoneId) {
+  const attributes = hass?.states?.[zoneId]?.attributes;
+  const latitude = attributes?.latitude;
+  const longitude = attributes?.longitude;
+  if (typeof latitude !== "number" || typeof longitude !== "number") return null;
+  return { latitude, longitude };
+}
+function withZoneLocation(hass, value, zoneId) {
+  if (!zoneId || !value || typeof value !== "object") return null;
+  const location = zoneLocation(hass, zoneId);
+  if (!location) return null;
+  return { ...value, location: { ...value.location || {}, ...location } };
+}
+var pickedZone = /* @__PURE__ */ new WeakMap();
+function onValueChanged(event) {
+  const path = event.composedPath();
+  const formIndex = path.findIndex((el) => el?.localName === "ha-form");
+  if (formIndex < 0) return;
+  const flow = path.find((el) => el?.localName === "step-flow-form");
+  if (!flow || !isPositionStep(flow.step)) return;
+  const form = path[formIndex];
+  if (formIndex > 0) {
+    const field = path.slice(0, formIndex).find((el) => typeof el?.schema?.name === "string");
+    if (field?.schema.name === ZONE_FIELD) {
+      pickedZone.set(form, event.detail?.value);
+    }
+    return;
+  }
+  if (!pickedZone.has(form)) return;
+  const zoneId = pickedZone.get(form);
+  pickedZone.delete(form);
+  const value = withZoneLocation(flow.hass, event.detail?.value, zoneId);
+  if (value) event.detail.value = value;
+}
+var installed = false;
+function installZoneFollower(target = document) {
+  if (installed) return;
+  installed = true;
+  target.addEventListener("value-changed", onValueChanged, true);
+}
+
 // src/loader.js
+installZoneFollower();
 var CARD_URL = new URL(import.meta.url);
 CARD_URL.pathname = CARD_URL.pathname.replace(/[^/]*$/, "naolib-card.js");
 var IMPORT_TIMEOUT_MS = 1e4;

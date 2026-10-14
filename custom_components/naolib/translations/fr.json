@@ -28,21 +28,13 @@
             },
             "by_location": {
                 "title": "Chercher autour d'une position",
-                "description": "Choisissez une zone de départ, ou videz le champ pour partir de votre domicile. La carte s'ouvre ensuite dessus, et vous pouvez encore déplacer le marqueur.",
+                "description": "Choisissez une zone ou déplacez le marqueur sur la carte pour rechercher les arrêts à proximité. Choisir une zone y place le marqueur.",
                 "data": {
-                    "zone": "Zone"
-                },
-                "data_description": {
-                    "zone": "La carte s'ouvre sur le centre de cette zone."
-                }
-            },
-            "by_location_map": {
-                "title": "Ajuster la position",
-                "description": "Déplacez le marqueur si besoin, puis validez pour rechercher les arrêts à proximité.",
-                "data": {
+                    "zone": "Zone",
                     "location": "Position"
                 },
                 "data_description": {
+                    "zone": "Le marqueur se place au centre de la zone ; vous pouvez encore l'ajuster.",
                     "location": "La recherche part du marqueur."
                 }
             },
@@ -58,21 +50,13 @@
             },
             "bike_by_location": {
                 "title": "Chercher autour d'une position",
-                "description": "Choisissez une zone de départ, ou videz le champ pour partir de votre domicile. La carte s'ouvre ensuite dessus, et vous pouvez encore déplacer le marqueur.",
+                "description": "Choisissez une zone ou déplacez le marqueur sur la carte pour rechercher les stations vélo à proximité. Choisir une zone y place le marqueur.",
                 "data": {
-                    "zone": "Zone"
-                },
-                "data_description": {
-                    "zone": "La carte s'ouvre sur le centre de cette zone."
-                }
-            },
-            "bike_by_location_map": {
-                "title": "Ajuster la position",
-                "description": "Déplacez le marqueur si besoin, puis validez pour rechercher les stations vélo à proximité.",
-                "data": {
+                    "zone": "Zone",
                     "location": "Position"
                 },
                 "data_description": {
+                    "zone": "Le marqueur se place au centre de la zone ; vous pouvez encore l'ajuster.",
                     "location": "La recherche part du marqueur."
                 }
             },
