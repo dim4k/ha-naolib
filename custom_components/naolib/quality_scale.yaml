@@ -74,8 +74,10 @@ rules:
   docs-troubleshooting: done
   docs-use-cases: done
   dynamic-devices:
-    status: exempt
-    comment: Each entry tracks a single stop or station chosen by the user.
+    status: done
+    comment: >
+      "Around me" entries add a device for each stop entering the radius as
+      the tracked entity moves.
   entity-category:
     status: exempt
     comment: Every entity is a primary entity; none is diagnostic or configuration.

@@ -28,12 +28,14 @@
             },
             "by_location": {
                 "title": "Chercher autour d'une position",
-                "description": "Choisissez une position sur la carte pour rechercher les arrêts à proximité.",
+                "description": "Choisissez une zone ou déplacez le marqueur sur la carte pour rechercher les arrêts à proximité. Choisir une zone y place le marqueur.",
                 "data": {
+                    "zone": "Zone",
                     "location": "Position"
                 },
                 "data_description": {
-                    "location": "Déplacez le marqueur sur la zone où chercher les arrêts. Par défaut, la position de votre domicile."
+                    "zone": "Le marqueur se place au centre de la zone ; vous pouvez encore l'ajuster.",
+                    "location": "La recherche part du marqueur."
                 }
             },
             "select_stop": {
@@ -48,12 +50,14 @@
             },
             "bike_by_location": {
                 "title": "Chercher autour d'une position",
-                "description": "Choisissez une position sur la carte pour rechercher les stations vélo à proximité.",
+                "description": "Choisissez une zone ou déplacez le marqueur sur la carte pour rechercher les stations vélo à proximité. Choisir une zone y place le marqueur.",
                 "data": {
+                    "zone": "Zone",
                     "location": "Position"
                 },
                 "data_description": {
-                    "location": "Déplacez le marqueur sur la zone où chercher les stations. Par défaut, la position de votre domicile."
+                    "zone": "Le marqueur se place au centre de la zone ; vous pouvez encore l'ajuster.",
+                    "location": "La recherche part du marqueur."
                 }
             },
             "select_station": {
@@ -85,7 +89,9 @@
             "no_stops_found": "Aucun arrêt correspondant.",
             "no_stations_found": "Aucune station vélo correspondante.",
             "cannot_connect": "Impossible de joindre le service vélo Naolib.",
-            "unknown": "Erreur inattendue."
+            "unknown": "Erreur inattendue.",
+            "not_in_list": "Choisissez un élément de la liste.",
+            "zone_without_location": "Cette zone n'a pas de coordonnées."
         },
         "abort": {
             "already_configured": "Cet arrêt ou cette station est déjà configuré.",

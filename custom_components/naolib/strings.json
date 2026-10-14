@@ -28,12 +28,14 @@
             },
             "by_location": {
                 "title": "Search around a location",
-                "description": "Pick a location on the map to search for nearby stops.",
+                "description": "Pick a zone or move the marker on the map to search for nearby stops. Picking a zone moves the marker onto it.",
                 "data": {
+                    "zone": "Zone",
                     "location": "Location"
                 },
                 "data_description": {
-                    "location": "Move the marker to the area where you want to look for stops. Defaults to your home location."
+                    "zone": "The marker moves to the centre of the zone; you can still adjust it.",
+                    "location": "The search starts from the marker."
                 }
             },
             "select_stop": {
@@ -48,12 +50,14 @@
             },
             "bike_by_location": {
                 "title": "Search around a location",
-                "description": "Pick a location on the map to search for nearby bike stations.",
+                "description": "Pick a zone or move the marker on the map to search for nearby bike stations. Picking a zone moves the marker onto it.",
                 "data": {
+                    "zone": "Zone",
                     "location": "Location"
                 },
                 "data_description": {
-                    "location": "Move the marker to the area where you want to look for stations. Defaults to your home location."
+                    "zone": "The marker moves to the centre of the zone; you can still adjust it.",
+                    "location": "The search starts from the marker."
                 }
             },
             "select_station": {
@@ -85,7 +89,9 @@
             "no_stops_found": "No matching stop found.",
             "no_stations_found": "No matching bike station found.",
             "cannot_connect": "Could not reach the Naolib bike service.",
-            "unknown": "Unexpected error."
+            "unknown": "Unexpected error.",
+            "not_in_list": "Pick an entry from the list.",
+            "zone_without_location": "This zone has no coordinates."
         },
         "abort": {
             "already_configured": "This stop or station is already configured.",

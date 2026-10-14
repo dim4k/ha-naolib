@@ -4,9 +4,11 @@
 // waits for the element registry to be final before defining anything.
 
 import { installDeviceRemoval } from "./flow-devices.js";
+import { installZoneFollower } from "./flow-zone.js";
 
 // Config flow helpers must work on the settings pages, where no card is
 // loaded: the loader is the module Home Assistant imports on every page.
+installZoneFollower();
 installDeviceRemoval();
 
 const CARD_URL = new URL(import.meta.url);
