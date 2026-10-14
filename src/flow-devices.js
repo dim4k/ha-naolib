@@ -7,10 +7,9 @@
 // area picker's device). If the markup changes, the cross is simply not
 // added; deleting the device from its page still works.
 
-const FLOW_DIALOG = "dialog-data-entry-flow";
+import { findAll, whileFlowDialogOpen } from "./flow-dialog.js";
+
 const CREATE_ENTRY_STEP = "step-flow-create-entry";
-const POLL_MS = 300;
-const MAX_POLL_MS = 10 * 60 * 1000;
 
 // Ids of the devices that are nearby stops of this "around me" entry.
 export function aroundStopDeviceIds(devices, entryId) {
@@ -24,14 +23,6 @@ export function aroundStopDeviceIds(devices, entryId) {
             )
             .map((device) => device.id),
     );
-}
-
-function findAll(root, localName, found = []) {
-    if (!root) return found;
-    if (root.localName === localName) found.push(root);
-    if (root.shadowRoot) findAll(root.shadowRoot, localName, found);
-    for (const child of root.children || []) findAll(child, localName, found);
-    return found;
 }
 
 function removeButton(onClick) {
@@ -77,35 +68,8 @@ function decorate(step) {
     }
 }
 
-let polling = null;
-
-function watchFlowDialog() {
-    if (polling) return;
-    const started = Date.now();
-    let seen = false;
-    polling = setInterval(() => {
-        const app = document.querySelector("home-assistant");
-        const open = findAll(app, FLOW_DIALOG).length > 0;
-        seen ||= open;
-        if ((seen && !open) || Date.now() - started > MAX_POLL_MS) {
-            clearInterval(polling);
-            polling = null;
-            return;
-        }
+export function installDeviceRemoval() {
+    whileFlowDialogOpen((app) => {
         for (const step of findAll(app, CREATE_ENTRY_STEP)) decorate(step);
-    }, POLL_MS);
-}
-
-let installed = false;
-
-export function installDeviceRemoval(target = window) {
-    if (installed) return;
-    installed = true;
-    target.addEventListener(
-        "show-dialog",
-        (event) => {
-            if (event.detail?.dialogTag === FLOW_DIALOG) watchFlowDialog();
-        },
-        true,
-    );
+    });
 }
