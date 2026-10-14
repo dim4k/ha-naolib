@@ -14,11 +14,28 @@ CONF_STATION_ID: str = "station_id"
 CONF_STATION_LABEL: str = "station_label"
 CONF_LOCATION: str = "location"
 CONF_UPDATE_INTERVAL: str = "update_interval"
+CONF_SOURCE_ENTITY: str = "source_entity"
+CONF_RADIUS: str = "radius"
+CONF_MAX_STOPS: str = "max_stops"
+CONF_EXCLUDED_STOPS: str = "excluded_stops"
 
-# An entry either tracks a transit stop or a bike-sharing station. Entries
-# created before the bike support have no type and are stops.
+# An entry tracks a transit stop, the stops around a tracked entity, or a
+# bike-sharing station. Entries created before the bike support have no type
+# and are stops.
 ENTRY_TYPE_STOP: str = "stop"
+ENTRY_TYPE_AROUND: str = "around"
 ENTRY_TYPE_BIKE: str = "bike"
+
+# "Around me": follow a person/zone/device_tracker and expose the stops within
+# a radius, recomputed as the entity moves.
+DEFAULT_AROUND_RADIUS: int = 500
+MIN_AROUND_RADIUS: int = 100
+MAX_AROUND_RADIUS: int = 3000
+DEFAULT_AROUND_MAX_STOPS: int = 5
+MIN_AROUND_MAX_STOPS: int = 1
+MAX_AROUND_MAX_STOPS: int = 15
+# Collapse bursts of location updates before recomputing nearby stops.
+AROUND_DEBOUNCE: int = 15
 
 # Action exposing the departures to scripts and automations.
 SERVICE_GET_DEPARTURES: str = "get_departures"
@@ -33,6 +50,8 @@ DEFAULT_UPDATE_INTERVAL: int = 60
 MIN_UPDATE_INTERVAL: int = 30
 MAX_UPDATE_INTERVAL: int = 600
 API_TIMEOUT: int = 20
+# The public SIRI endpoint allows one request every 30 seconds per IP.
+API_MIN_SPACING: int = 31
 
 # Naolib / Okina real-time SIRI endpoint (keyless public access).
 # A single StopMonitoring request without MonitoringRef returns the whole
