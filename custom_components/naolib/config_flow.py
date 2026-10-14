@@ -392,7 +392,9 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Choose a bike station among the ones just found."""
         if self._wants_back(user_input):
-            return await getattr(self, f"async_step_{self._station_origin}")()
+            if self._station_origin == "bike_by_location":
+                return await self.async_step_bike_by_location()
+            return await self.async_step_bike()
         station = (
             None
             if user_input is None
@@ -435,7 +437,9 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Choose a stop among the ones just found."""
         if self._wants_back(user_input):
-            return await getattr(self, f"async_step_{self._stop_origin}")()
+            if self._stop_origin == "by_location":
+                return await self.async_step_by_location()
+            return await self.async_step_stop()
         stop = (
             None
             if user_input is None
