@@ -15,6 +15,7 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.naolib.const import (
     AROUND_DEBOUNCE,
     CONF_ENTRY_TYPE,
+    CONF_EXCLUDED_STOPS,
     CONF_MAX_STOPS,
     CONF_RADIUS,
     CONF_SOURCE_ENTITY,
@@ -208,3 +209,27 @@ async def test_unload_cancels_a_pending_recomputation(hass: HomeAssistant) -> No
     await hass.async_block_till_done()
 
     assert not _own_stops(hass.data[DOMAIN].coordinator, entry)
+
+
+async def test_excluded_stops_are_never_shown(hass: HomeAssistant) -> None:
+    """An excluded stop is skipped and its slot goes to the next closest one."""
+    _at(hass, _LAT, _LON)
+    reference = _entry()
+    await _setup(hass, reference)
+    nearest = sorted(_own_stops(hass.data[DOMAIN].coordinator, reference))
+    assert await hass.config_entries.async_unload(reference.entry_id)
+    await hass.async_block_till_done()
+    excluded = nearest[0].split(":", 1)[1]
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="around_other",
+        data={**reference.data, CONF_EXCLUDED_STOPS: [excluded]},
+    )
+    await _setup(hass, entry)
+
+    codes = {
+        key.split(":", 1)[1] for key in _own_stops(hass.data[DOMAIN].coordinator, entry)
+    }
+    assert excluded not in codes
+    assert len(codes) == len(nearest)

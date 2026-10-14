@@ -18,6 +18,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .bike import NaolibBikeCoordinator, NaolibBikeStation, build_station_data
 from .const import (
     CONF_ENTRY_TYPE,
+    CONF_EXCLUDED_STOPS,
     CONF_MAX_STOPS,
     CONF_RADIUS,
     CONF_SOURCE_ENTITY,
@@ -67,6 +68,7 @@ async def async_setup_entry(
             source_entity=entry.data[CONF_SOURCE_ENTITY],
             radius=entry.data.get(CONF_RADIUS, DEFAULT_AROUND_RADIUS),
             max_stops=entry.data.get(CONF_MAX_STOPS, DEFAULT_AROUND_MAX_STOPS),
+            excluded=entry.data.get(CONF_EXCLUDED_STOPS, []),
             interval=int(
                 entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
             ),

@@ -17,6 +17,7 @@ CONF_UPDATE_INTERVAL: str = "update_interval"
 CONF_SOURCE_ENTITY: str = "source_entity"
 CONF_RADIUS: str = "radius"
 CONF_MAX_STOPS: str = "max_stops"
+CONF_EXCLUDED_STOPS: str = "excluded_stops"
 
 # An entry tracks a transit stop, the stops around a tracked entity, or a
 # bike-sharing station. Entries created before the bike support have no type
