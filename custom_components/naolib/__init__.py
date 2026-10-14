@@ -337,7 +337,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: NaolibConfigEntry) 
 )
 @websocket_api.async_response
 async def handle_around_subscribe(
-    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """Stream the stops around an entity, and their departures, to a card.
 
