@@ -118,43 +118,52 @@ function aroundStopDeviceIds(devices, entryId) {
     ).map((device) => device.id)
   );
 }
-function removeButton(onClick) {
+function removeButton(row, step, entryId) {
   const button = document.createElement("ha-icon-button");
+  button.dataset.naolibRemove = "1";
   button.label = "Retirer cet arrêt";
   button.title = "Retirer cet arrêt";
   button.style.cssText = "position: absolute; top: 0; right: 0;";
   const icon = document.createElement("ha-icon");
   icon.icon = "mdi:close";
   button.appendChild(icon);
-  button.addEventListener("click", onClick);
+  button.addEventListener("click", async () => {
+    const deviceId = row.querySelector("ha-area-picker")?.device;
+    if (!deviceId) return;
+    button.disabled = true;
+    try {
+      await step.hass.callWS({
+        type: "config/device_registry/remove_config_entry",
+        config_entry_id: entryId,
+        device_id: deviceId
+      });
+    } catch (err) {
+      console.error("Naolib: cannot remove the stop", err);
+      button.disabled = false;
+    }
+  });
   return button;
 }
 function decorate(step) {
   const entryId = step.step?.result?.entry_id;
   if (step.step?.handler !== "naolib" || !entryId || !step.shadowRoot) return;
   const ids = aroundStopDeviceIds(step.devices, entryId);
-  if (!ids.size) return;
   for (const row of step.shadowRoot.querySelectorAll("div.device")) {
-    if (row.dataset.naolibRemove) continue;
     const deviceId = row.querySelector("ha-area-picker")?.device;
-    if (!ids.has(deviceId)) continue;
-    row.dataset.naolibRemove = "1";
-    row.style.position = "relative";
-    const button = removeButton(async () => {
-      button.disabled = true;
-      try {
-        await step.hass.callWS({
-          type: "config/device_registry/remove_config_entry",
-          config_entry_id: entryId,
-          device_id: deviceId
-        });
-        row.remove();
-      } catch (err) {
-        console.error("Naolib: cannot remove the stop", err);
-        button.disabled = false;
-      }
-    });
-    row.appendChild(button);
+    let button = row.querySelector(":scope > [data-naolib-remove]");
+    if (!ids.has(deviceId)) {
+      button?.remove();
+      continue;
+    }
+    if (!button) {
+      row.style.position = "relative";
+      button = removeButton(row, step, entryId);
+      row.appendChild(button);
+    }
+    if (button.naolibDevice !== deviceId) {
+      button.naolibDevice = deviceId;
+      button.disabled = false;
+    }
   }
 }
 function installDeviceRemoval() {

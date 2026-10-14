@@ -402,8 +402,9 @@ async def async_remove_config_entry_device(
     """Allow deleting a nearby stop of an "around me" entry, to hide it.
 
     The stop is added to the entry's exclusions, so it never comes back, even
-    when the tracked entity returns near it. Stops and bike stations of the
-    other entries are what the entry is about: they cannot be deleted alone.
+    when the tracked entity returns near it, and no other stop takes its slot.
+    Stops and bike stations of the other entries are what the entry is about:
+    they cannot be deleted alone.
     """
     if not _is_around(entry):
         return False
