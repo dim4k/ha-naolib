@@ -1,7 +1,7 @@
 """Tests for the "around me" dynamic controller."""
 
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -12,13 +12,17 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
 )
 
+from custom_components.naolib import async_remove_config_entry_device
 from custom_components.naolib.const import (
     AROUND_DEBOUNCE,
     CONF_ENTRY_TYPE,
     CONF_EXCLUDED_STOPS,
     CONF_MAX_STOPS,
+    CONF_QUAYS,
     CONF_RADIUS,
     CONF_SOURCE_ENTITY,
+    CONF_STOP_CODE,
+    CONF_STOP_LABEL,
     DOMAIN,
     ENTRY_TYPE_AROUND,
 )
@@ -233,3 +237,67 @@ async def test_excluded_stops_are_never_shown(hass: HomeAssistant) -> None:
     }
     assert excluded not in codes
     assert len(codes) == len(nearest)
+
+
+async def test_deleting_a_stop_device_excludes_it(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    """Deleting a nearby stop's device hides that stop for good."""
+    _at(hass, _LAT, _LON)
+    entry = _entry()
+    await _setup(hass, entry)
+    device = _devices(hass, entry)[0]
+    code = next(iter(device.identifiers))[1].removeprefix(f"around_{entry.entry_id}_")
+
+    client = await hass_ws_client(hass)
+    with _patch_api():
+        await client.send_json_auto_id(
+            {
+                "type": "config/device_registry/remove_config_entry",
+                "config_entry_id": entry.entry_id,
+                "device_id": device.id,
+            }
+        )
+        response = await client.receive_json()
+        await hass.async_block_till_done()
+
+    assert response["success"]
+    assert entry.data[CONF_EXCLUDED_STOPS] == [code]
+    coordinator = hass.data[DOMAIN].coordinator
+    assert f"{entry.entry_id}:{code}" not in coordinator.stops
+    assert _own_stops(coordinator, entry)  # another stop took its place
+
+
+async def test_stop_devices_of_other_entries_cannot_be_deleted(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    """A fixed stop is what its entry is about: its device cannot go alone."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="STOP1",
+        data={CONF_STOP_CODE: "STOP1", CONF_STOP_LABEL: "A", CONF_QUAYS: ["Q1"]},
+    )
+    await _setup(hass, entry)
+    device = _devices(hass, entry)[0]
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {
+            "type": "config/device_registry/remove_config_entry",
+            "config_entry_id": entry.entry_id,
+            "device_id": device.id,
+        }
+    )
+    response = await client.receive_json()
+
+    assert not response["success"]
+    assert _devices(hass, entry)
+
+
+async def test_a_device_without_a_stop_is_not_deleted(hass: HomeAssistant) -> None:
+    """Only the nearby-stop devices of the entry can be deleted."""
+    entry = _entry()
+    entry.add_to_hass(hass)
+    stranger = MagicMock(identifiers={(DOMAIN, "STOP1"), ("other", "x")})
+
+    assert not await async_remove_config_entry_device(hass, entry, stranger)
