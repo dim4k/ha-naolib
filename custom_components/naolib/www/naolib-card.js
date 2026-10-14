@@ -24,6 +24,21 @@ function matchingEntities(hass, predicate, current) {
   if (current && !ids.includes(current)) ids.push(current);
   return ids;
 }
+function isAroundEntity(state) {
+  return isDepartureEntity(state) && typeof state.attributes.around_source === "string";
+}
+function aroundSources(hass) {
+  const sources = /* @__PURE__ */ new Set();
+  for (const state of Object.values(hass?.states || {})) {
+    if (isAroundEntity(state)) sources.add(state.attributes.around_source);
+  }
+  return [...sources].sort();
+}
+function aroundSensors(hass, source) {
+  return Object.values(hass?.states || {}).filter(
+    (state) => isAroundEntity(state) && state.attributes.around_source === source
+  );
+}
 
 // src/html.js
 function esc(value) {
@@ -43,6 +58,23 @@ function esc(value) {
 function message(html) {
   return `<div class="no-bus">${html}</div>`;
 }
+
+// src/styles/around.js
+var around = `
+    .around { padding: 0 16px 12px; }
+    .around-stop + .around-stop { border-top: 1px solid var(--divider-color); }
+    .around-stop { padding: 8px 0; }
+    .around-stop-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+    .around-stop-name { flex: 1; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .around-distance { font-size: 0.8em; color: var(--secondary-text-color); white-space: nowrap; }
+    .around-departure { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+    .around-departure .badge { margin-right: 0; }
+    .around-destination { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .around-empty { font-size: 0.85em; font-style: italic; color: var(--secondary-text-color); }
+    :host([compact]) .around { padding: 0 12px 8px; }
+    :host([compact]) .around-stop { padding: 4px 0; }
+    :host([compact]) .around-departure { padding: 1px 0; }
+`;
 
 // src/styles/base.js
 var base = `
@@ -213,7 +245,7 @@ var timetable = `
 `;
 
 // src/styles/index.js
-var styles = [base, departures, timetable, bike].join("\n");
+var styles = [base, departures, timetable, bike, around].join("\n");
 
 // src/base-card.js
 var NaolibBaseCard = class extends HTMLElement {
@@ -337,46 +369,6 @@ var DELAY_TOLERANCE_MINUTES = 2;
 var STALE_SECONDS = 60;
 var SERVICE_DAY_CUTOFF_HOUR = 4;
 
-// src/time.js
-function humanizeSeconds(delta) {
-  if (delta <= 60) return "proche";
-  const minutes = Math.floor(delta / 60);
-  if (minutes < 60) return `${minutes} mn`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h${String(minutes % 60).padStart(2, "0")}`;
-}
-function serviceHourKey(hour) {
-  const value = parseInt(hour, 10);
-  return value < SERVICE_DAY_CUTOFF_HOUR ? value + 24 : value;
-}
-function formatClock(date) {
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-var DAY_FORMAT = new Intl.DateTimeFormat("fr-FR", {
-  weekday: "long",
-  day: "numeric",
-  month: "long"
-});
-function formatDay(date) {
-  const label = DAY_FORMAT.format(date);
-  return label.charAt(0).toUpperCase() + label.slice(1);
-}
-function relativeDay(offset) {
-  if (offset === 0) return "Aujourd'hui";
-  if (offset === 1) return "Demain";
-  if (offset === 2) return "Après-demain";
-  return `Dans ${offset} jours`;
-}
-function passageDate(now, hour, minute) {
-  const reference = new Date(now);
-  const date = new Date(now);
-  date.setHours(hour, minute, 0, 0);
-  if (hour < SERVICE_DAY_CUTOFF_HOUR && reference.getHours() >= SERVICE_DAY_CUTOFF_HOUR) {
-    date.setDate(date.getDate() + 1);
-  }
-  return date;
-}
-
 // src/validate.js
 function configValidator(cardType) {
   function invalid(message2) {
@@ -406,74 +398,45 @@ function configValidator(cardType) {
   };
 }
 
-// src/config.js
-var DEFAULT_CONFIG = {
+// src/around/config.js
+var DEFAULT_AROUND_CONFIG = {
   entity: "",
+  // the person, zone or device tracker an "around me" entry follows
   title: "",
-  lines: [],
-  direction: 0,
-  // 0 = both directions
-  walk_time: 0,
-  // minutes needed to reach the stop
-  max_lines: 6,
-  // rows per direction, or per card when compact
-  show_timetable_button: true,
+  departures: 3,
+  // per stop
+  max_stops: 0,
+  // 0 = every stop the entry exposes
   compact: false
 };
-var MAX_LINES_LIMIT = 30;
-var MAX_WALK_TIME = 60;
-var check = configValidator("naolib-card");
-function normalizeConfig(config) {
-  const raw = check.base(config, DEFAULT_CONFIG);
-  let lines = raw.lines;
-  if (lines === null || lines === void 0) lines = [];
-  if (typeof lines === "string" || typeof lines === "number") lines = [lines];
-  if (!Array.isArray(lines)) check.invalid('"lines" doit être une liste de lignes');
+var MAX_DEPARTURES = 10;
+var MAX_STOPS = 15;
+var check = configValidator("naolib-around-card");
+function normalizeAroundConfig(config) {
+  const raw = check.base(config, DEFAULT_AROUND_CONFIG);
   return {
     ...raw,
-    lines: lines.map((line) => String(line)),
-    direction: check.integer(raw.direction ?? 0, "direction", 0, 2),
-    walk_time: check.integer(raw.walk_time ?? 0, "walk_time", 0, MAX_WALK_TIME),
-    max_lines: check.integer(
-      raw.max_lines ?? DEFAULT_CONFIG.max_lines,
-      "max_lines",
-      1,
-      MAX_LINES_LIMIT
-    ),
-    show_timetable_button: check.boolean(
-      raw.show_timetable_button,
-      "show_timetable_button"
-    ),
+    departures: check.integer(raw.departures, "departures", 1, MAX_DEPARTURES),
+    max_stops: check.integer(raw.max_stops, "max_stops", 0, MAX_STOPS),
     compact: check.boolean(raw.compact, "compact")
   };
 }
-function matchesFilters(line, direction, config) {
-  if (config.lines.length) {
-    const wanted = String(line ?? "").toLowerCase();
-    if (!config.lines.some((l) => String(l).toLowerCase() === wanted)) return false;
-  }
-  if (!config.direction) return true;
-  return Number(direction) === config.direction;
-}
-function prepareDepartures(departures2, config, now = Date.now()) {
-  const earliest = now + config.walk_time * MS_PER_MINUTE;
-  const out = [];
-  for (const departure of departures2 || []) {
-    if (!matchesFilters(departure.line, departure.direction, config)) continue;
-    const timestamp = Date.parse(departure.expected_ts);
-    if (Number.isNaN(timestamp)) continue;
-    if (timestamp < earliest) continue;
-    const delta = (timestamp - now) / 1e3;
-    if (delta < -STALE_SECONDS) continue;
-    out.push({
-      ...departure,
-      time: humanizeSeconds(delta),
-      // Kept numeric so the renderer never has to parse the label back.
-      minutes: Math.max(0, Math.floor(delta / 60))
-    });
-    if (config.compact && out.length >= config.max_lines) break;
-  }
-  return out;
+function prepareStops(sensors, config, now = Date.now()) {
+  const stops = sensors.map((state) => {
+    const attributes = state.attributes;
+    const departures2 = (attributes.next_departures || []).map((departure) => ({
+      line: departure.line,
+      destination: departure.destination,
+      seconds: (Date.parse(departure.expected_ts) - now) / 1e3
+    })).filter((departure) => Number.isFinite(departure.seconds)).filter((departure) => departure.seconds >= -60).slice(0, config.departures);
+    return {
+      entityId: state.entity_id,
+      name: attributes.stop_label || attributes.friendly_name || "",
+      distance: Number(attributes.distance),
+      departures: departures2
+    };
+  }).sort((a, b) => (a.distance || 0) - (b.distance || 0));
+  return config.max_stops ? stops.slice(0, config.max_stops) : stops;
 }
 
 // src/lines.js
@@ -562,8 +525,337 @@ function modeLabel(type) {
   return MODE_LABELS[type] || "Bus";
 }
 
+// src/time.js
+function humanizeSeconds(delta) {
+  if (delta <= 60) return "proche";
+  const minutes = Math.floor(delta / 60);
+  if (minutes < 60) return `${minutes} mn`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h${String(minutes % 60).padStart(2, "0")}`;
+}
+function serviceHourKey(hour) {
+  const value = parseInt(hour, 10);
+  return value < SERVICE_DAY_CUTOFF_HOUR ? value + 24 : value;
+}
+function formatClock(date) {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+var DAY_FORMAT = new Intl.DateTimeFormat("fr-FR", {
+  weekday: "long",
+  day: "numeric",
+  month: "long"
+});
+function formatDay(date) {
+  const label = DAY_FORMAT.format(date);
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+function relativeDay(offset) {
+  if (offset === 0) return "Aujourd'hui";
+  if (offset === 1) return "Demain";
+  if (offset === 2) return "Après-demain";
+  return `Dans ${offset} jours`;
+}
+function passageDate(now, hour, minute) {
+  const reference = new Date(now);
+  const date = new Date(now);
+  date.setHours(hour, minute, 0, 0);
+  if (hour < SERVICE_DAY_CUTOFF_HOUR && reference.getHours() >= SERVICE_DAY_CUTOFF_HOUR) {
+    date.setDate(date.getDate() + 1);
+  }
+  return date;
+}
+
+// src/around/render.js
+function timeClass(seconds) {
+  const minutes = seconds / 60;
+  if (minutes <= URGENT_MINUTES) return "time urgent";
+  if (minutes <= WARNING_MINUTES) return "time warning";
+  return "time";
+}
+function departureHtml(departure) {
+  return `
+        <div class="around-departure">
+            ${lineBadge(departure.line ?? "?")}
+            <div class="around-destination">${esc(departure.destination)}</div>
+            <div class="${timeClass(departure.seconds)}">${esc(humanizeSeconds(departure.seconds))}</div>
+        </div>
+    `;
+}
+function stopHtml(stop) {
+  const distance = Number.isFinite(stop.distance) ? `<div class="around-distance">${esc(String(stop.distance))} m</div>` : "";
+  const departures2 = stop.departures.length ? stop.departures.map(departureHtml).join("") : `<div class="around-empty">Aucun passage prévu</div>`;
+  return `
+        <div class="around-stop">
+            <div class="around-stop-header">
+                <div class="around-stop-name">${esc(stop.name)}</div>
+                ${distance}
+            </div>
+            ${departures2}
+        </div>
+    `;
+}
+function renderAround(stops) {
+  return `<div class="around">${stops.map(stopHtml).join("")}</div>`;
+}
+
+// src/around/card.js
+var NaolibAroundCard = class extends NaolibBaseCard {
+  static getConfigElement() {
+    return document.createElement("naolib-around-card-editor");
+  }
+  static getStubConfig(hass) {
+    return { entity: aroundSources(hass)[0] || "" };
+  }
+  connectedCallback() {
+    if (this._ticker) return;
+    this._ticker = setInterval(() => {
+      if (!this._sensors || !this.content) return;
+      try {
+        this._render();
+      } catch (err) {
+        console.error("Naolib around card: render failed", err);
+      }
+    }, TICK_MS);
+  }
+  disconnectedCallback() {
+    clearInterval(this._ticker);
+    this._ticker = null;
+  }
+  setConfig(config) {
+    this._key = null;
+    super.setConfig(config);
+  }
+  _updateFromHass(hass) {
+    if (!hass) return;
+    if (!this.content) this._initShadowDom();
+    const source = this.config.entity || aroundSources(hass)[0];
+    if (!source) {
+      this._message(this.constructor.noEntityMessage);
+      return;
+    }
+    const sensors = aroundSensors(hass, source);
+    const key = [source, ...sensors.map((s) => `${s.entity_id}@${s.last_updated}`)].sort().join("|");
+    if (key === this._key) return;
+    this._key = key;
+    this._sensors = sensors;
+    const name = hass.states[source]?.attributes?.friendly_name || source;
+    this._updateTitle(this.config.title || `Autour de ${name}`);
+    this._render();
+  }
+  _render() {
+    if (!this._sensors.length) {
+      this._message("Aucun arrêt à proximité pour le moment.");
+      return;
+    }
+    this.content.innerHTML = renderAround(
+      prepareStops(this._sensors, this.config),
+      this.config
+    );
+  }
+  getCardSize() {
+    const stops = prepareStops(this._sensors || [], this.config);
+    return 1 + stops.reduce((size, stop) => size + 1 + stop.departures.length, 0);
+  }
+};
+__publicField(NaolibAroundCard, "normalizeConfig", normalizeAroundConfig);
+__publicField(NaolibAroundCard, "acceptsEntity", isAroundEntity);
+__publicField(NaolibAroundCard, "icon", "mdi:map-marker-radius");
+__publicField(NaolibAroundCard, "defaultTitle", "Arrêts à proximité");
+__publicField(NaolibAroundCard, "noEntityMessage", "Aucune entrée « autour de moi » trouvée. Ajoutez-en une via Paramètres &gt; Appareils et services.");
+__publicField(NaolibAroundCard, "logLabel", "Naolib around card");
+
+// src/form-editor.js
+var NaolibFormEditor = class extends HTMLElement {
+  buildSchema(_hass, _config) {
+    return [];
+  }
+  // Hooks for the options whose form value differs from the stored one.
+  toFormData(config) {
+    return config;
+  }
+  fromFormData(config, value) {
+    return { ...config, ...value };
+  }
+  setConfig(config) {
+    this._config = { ...this.constructor.defaults, ...config || {} };
+    this._render();
+  }
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+  _render() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      const { labels, helpers } = this.constructor;
+      this._form = document.createElement("ha-form");
+      this._form.computeLabel = (schema) => labels[schema.name] || schema.name;
+      this._form.computeHelper = (schema) => helpers[schema.name] || "";
+      this._form.addEventListener(
+        "value-changed",
+        (ev) => this._valueChanged(ev)
+      );
+      this.appendChild(this._form);
+    }
+    this._form.hass = this._hass;
+    this._form.schema = this.buildSchema(this._hass, this._config);
+    this._form.data = this.toFormData(this._config);
+  }
+  _valueChanged(ev) {
+    ev.stopPropagation();
+    this._config = this.fromFormData(this._config, ev.detail.value);
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: this._prune(this._config) },
+        bubbles: true,
+        composed: true
+      })
+    );
+  }
+  // Keep the stored configuration to what the user actually changed, so the
+  // YAML editor stays readable.
+  _prune(config) {
+    const defaults = this.constructor.defaults;
+    const out = {};
+    for (const [key, value] of Object.entries(config)) {
+      if (key in defaults && JSON.stringify(value) === JSON.stringify(defaults[key])) {
+        continue;
+      }
+      out[key] = value;
+    }
+    return out;
+  }
+};
+__publicField(NaolibFormEditor, "defaults", {});
+__publicField(NaolibFormEditor, "labels", {});
+__publicField(NaolibFormEditor, "helpers", {});
+
+// src/around/editor.js
+var LABELS = {
+  entity: "Entité suivie (personne, zone ou traceur)",
+  title: "Titre",
+  departures: "Départs affichés par arrêt",
+  max_stops: "Nombre maximum d'arrêts",
+  compact: "Mode compact"
+};
+var HELPERS = {
+  entity: "Celle d'une entrée Naolib « autour de moi ».",
+  title: "Laisser vide pour « Autour de … ».",
+  max_stops: "Mettre à 0 pour afficher tous les arrêts de l'entrée."
+};
+function buildSchema(hass, config) {
+  const sources = aroundSources(hass);
+  if (config.entity && !sources.includes(config.entity)) sources.push(config.entity);
+  return [
+    {
+      name: "entity",
+      required: true,
+      selector: {
+        entity: {
+          filter: [{ domain: ["person", "zone", "device_tracker"] }],
+          include_entities: sources
+        }
+      }
+    },
+    { name: "title", selector: { text: {} } },
+    {
+      name: "",
+      type: "grid",
+      schema: [
+        {
+          name: "departures",
+          selector: { number: { min: 1, max: MAX_DEPARTURES, mode: "box" } }
+        },
+        {
+          name: "max_stops",
+          selector: { number: { min: 0, max: MAX_STOPS, mode: "box" } }
+        },
+        { name: "compact", selector: { boolean: {} } }
+      ]
+    }
+  ];
+}
+var NaolibAroundCardEditor = class extends NaolibFormEditor {
+  buildSchema(hass, config) {
+    return buildSchema(hass, config);
+  }
+};
+__publicField(NaolibAroundCardEditor, "defaults", DEFAULT_AROUND_CONFIG);
+__publicField(NaolibAroundCardEditor, "labels", LABELS);
+__publicField(NaolibAroundCardEditor, "helpers", HELPERS);
+
+// src/config.js
+var DEFAULT_CONFIG = {
+  entity: "",
+  title: "",
+  lines: [],
+  direction: 0,
+  // 0 = both directions
+  walk_time: 0,
+  // minutes needed to reach the stop
+  max_lines: 6,
+  // rows per direction, or per card when compact
+  show_timetable_button: true,
+  compact: false
+};
+var MAX_LINES_LIMIT = 30;
+var MAX_WALK_TIME = 60;
+var check2 = configValidator("naolib-card");
+function normalizeConfig(config) {
+  const raw = check2.base(config, DEFAULT_CONFIG);
+  let lines = raw.lines;
+  if (lines === null || lines === void 0) lines = [];
+  if (typeof lines === "string" || typeof lines === "number") lines = [lines];
+  if (!Array.isArray(lines)) check2.invalid('"lines" doit être une liste de lignes');
+  return {
+    ...raw,
+    lines: lines.map((line) => String(line)),
+    direction: check2.integer(raw.direction ?? 0, "direction", 0, 2),
+    walk_time: check2.integer(raw.walk_time ?? 0, "walk_time", 0, MAX_WALK_TIME),
+    max_lines: check2.integer(
+      raw.max_lines ?? DEFAULT_CONFIG.max_lines,
+      "max_lines",
+      1,
+      MAX_LINES_LIMIT
+    ),
+    show_timetable_button: check2.boolean(
+      raw.show_timetable_button,
+      "show_timetable_button"
+    ),
+    compact: check2.boolean(raw.compact, "compact")
+  };
+}
+function matchesFilters(line, direction, config) {
+  if (config.lines.length) {
+    const wanted = String(line ?? "").toLowerCase();
+    if (!config.lines.some((l) => String(l).toLowerCase() === wanted)) return false;
+  }
+  if (!config.direction) return true;
+  return Number(direction) === config.direction;
+}
+function prepareDepartures(departures2, config, now = Date.now()) {
+  const earliest = now + config.walk_time * MS_PER_MINUTE;
+  const out = [];
+  for (const departure of departures2 || []) {
+    if (!matchesFilters(departure.line, departure.direction, config)) continue;
+    const timestamp = Date.parse(departure.expected_ts);
+    if (Number.isNaN(timestamp)) continue;
+    if (timestamp < earliest) continue;
+    const delta = (timestamp - now) / 1e3;
+    if (delta < -STALE_SECONDS) continue;
+    out.push({
+      ...departure,
+      time: humanizeSeconds(delta),
+      // Kept numeric so the renderer never has to parse the label back.
+      minutes: Math.max(0, Math.floor(delta / 60))
+    });
+    if (config.compact && out.length >= config.max_lines) break;
+  }
+  return out;
+}
+
 // src/render/departures.js
-function timeClass(minutes) {
+function timeClass2(minutes) {
   if (minutes <= URGENT_MINUTES) return "time urgent";
   if (minutes <= WARNING_MINUTES) return "time warning";
   return "time";
@@ -614,7 +906,7 @@ function stripHtml(first, second) {
     `;
 }
 function tileHtml(first, second) {
-  const countdown = `<div class="${timeClass(first.minutes)}">${esc(first.time)}</div>`;
+  const countdown = `<div class="${timeClass2(first.minutes)}">${esc(first.time)}</div>`;
   return `
         <div class="tile">
             ${tileRow(first, countdown)}
@@ -626,7 +918,7 @@ function compactTileHtml(departure) {
   const expected = Date.parse(departure.expected_ts);
   const title = Number.isNaN(expected) ? "" : ` title="${formatClock(new Date(expected))}"`;
   const mark = departure.is_last ? `<span class="mark">dernier</span>` : "";
-  const countdown = `<div class="${timeClass(departure.minutes)}"${title}>${esc(departure.time)}</div>`;
+  const countdown = `<div class="${timeClass2(departure.minutes)}"${title}>${esc(departure.time)}</div>`;
   return `<div class="tile">${tileRow(departure, `${mark}${countdown}`)}</div>`;
 }
 function groupedTiles(departures2, direction, config) {
@@ -1103,25 +1395,25 @@ var DEFAULT_BIKE_CONFIG = {
 };
 var MAX_NEARBY_COUNT = 10;
 var MAX_NEARBY_RADIUS = 1e3;
-var check2 = configValidator("naolib-bike-card");
+var check3 = configValidator("naolib-bike-card");
 function normalizeBikeConfig(config) {
-  const raw = check2.base(config, DEFAULT_BIKE_CONFIG);
+  const raw = check3.base(config, DEFAULT_BIKE_CONFIG);
   return {
     ...raw,
-    nearby_count: check2.integer(
+    nearby_count: check3.integer(
       raw.nearby_count ?? DEFAULT_BIKE_CONFIG.nearby_count,
       "nearby_count",
       0,
       MAX_NEARBY_COUNT
     ),
-    nearby_radius: check2.integer(
+    nearby_radius: check3.integer(
       raw.nearby_radius ?? DEFAULT_BIKE_CONFIG.nearby_radius,
       "nearby_radius",
       0,
       MAX_NEARBY_RADIUS
     ),
-    show_docks: check2.boolean(raw.show_docks, "show_docks"),
-    compact: check2.boolean(raw.compact, "compact")
+    show_docks: check3.boolean(raw.show_docks, "show_docks"),
+    compact: check3.boolean(raw.compact, "compact")
   };
 }
 function prepareNearby(stations, config) {
@@ -1265,74 +1557,8 @@ __publicField(NaolibBikeCard, "defaultTitle", "Station vélo Naolib");
 __publicField(NaolibBikeCard, "noEntityMessage", "Aucune station vélo Naolib trouvée. Ajoutez-la via Paramètres &gt; Appareils et services.");
 __publicField(NaolibBikeCard, "logLabel", "Naolib bike card");
 
-// src/form-editor.js
-var NaolibFormEditor = class extends HTMLElement {
-  buildSchema(_hass, _config) {
-    return [];
-  }
-  // Hooks for the options whose form value differs from the stored one.
-  toFormData(config) {
-    return config;
-  }
-  fromFormData(config, value) {
-    return { ...config, ...value };
-  }
-  setConfig(config) {
-    this._config = { ...this.constructor.defaults, ...config || {} };
-    this._render();
-  }
-  set hass(hass) {
-    this._hass = hass;
-    this._render();
-  }
-  _render() {
-    if (!this._hass || !this._config) return;
-    if (!this._form) {
-      const { labels, helpers } = this.constructor;
-      this._form = document.createElement("ha-form");
-      this._form.computeLabel = (schema) => labels[schema.name] || schema.name;
-      this._form.computeHelper = (schema) => helpers[schema.name] || "";
-      this._form.addEventListener(
-        "value-changed",
-        (ev) => this._valueChanged(ev)
-      );
-      this.appendChild(this._form);
-    }
-    this._form.hass = this._hass;
-    this._form.schema = this.buildSchema(this._hass, this._config);
-    this._form.data = this.toFormData(this._config);
-  }
-  _valueChanged(ev) {
-    ev.stopPropagation();
-    this._config = this.fromFormData(this._config, ev.detail.value);
-    this.dispatchEvent(
-      new CustomEvent("config-changed", {
-        detail: { config: this._prune(this._config) },
-        bubbles: true,
-        composed: true
-      })
-    );
-  }
-  // Keep the stored configuration to what the user actually changed, so the
-  // YAML editor stays readable.
-  _prune(config) {
-    const defaults = this.constructor.defaults;
-    const out = {};
-    for (const [key, value] of Object.entries(config)) {
-      if (key in defaults && JSON.stringify(value) === JSON.stringify(defaults[key])) {
-        continue;
-      }
-      out[key] = value;
-    }
-    return out;
-  }
-};
-__publicField(NaolibFormEditor, "defaults", {});
-__publicField(NaolibFormEditor, "labels", {});
-__publicField(NaolibFormEditor, "helpers", {});
-
 // src/bike/editor.js
-var LABELS = {
+var LABELS2 = {
   entity: "Entité (station vélo Naolib)",
   title: "Titre",
   nearby_count: "Stations à proximité affichées",
@@ -1340,13 +1566,13 @@ var LABELS = {
   show_docks: "Afficher les places disponibles",
   compact: "Mode compact"
 };
-var HELPERS = {
+var HELPERS2 = {
   title: "Laisser vide pour utiliser le nom de la station.",
   nearby_count: "Mettre à 0 pour masquer les stations voisines.",
   nearby_radius: "Les stations plus éloignées ne sont pas proposées.",
   compact: "Masque la jauge de remplissage."
 };
-function buildSchema(hass, config) {
+function buildSchema2(hass, config) {
   return [
     {
       name: "entity",
@@ -1393,15 +1619,15 @@ function buildSchema(hass, config) {
 }
 var NaolibBikeCardEditor = class extends NaolibFormEditor {
   buildSchema(hass, config) {
-    return buildSchema(hass, config);
+    return buildSchema2(hass, config);
   }
 };
 __publicField(NaolibBikeCardEditor, "defaults", DEFAULT_BIKE_CONFIG);
-__publicField(NaolibBikeCardEditor, "labels", LABELS);
-__publicField(NaolibBikeCardEditor, "helpers", HELPERS);
+__publicField(NaolibBikeCardEditor, "labels", LABELS2);
+__publicField(NaolibBikeCardEditor, "helpers", HELPERS2);
 
 // src/editor.js
-var LABELS2 = {
+var LABELS3 = {
   entity: "Entité (arrêt Naolib)",
   title: "Titre",
   lines: "Lignes",
@@ -1411,7 +1637,7 @@ var LABELS2 = {
   show_timetable_button: "Bouton « Voir tous les horaires »",
   compact: "Mode compact"
 };
-var HELPERS2 = {
+var HELPERS3 = {
   title: "Laisser vide pour utiliser le nom de l'arrêt.",
   lines: "Ne garder que ces lignes. Toutes les lignes si vide.",
   walk_time: "Masque les départs qui ne peuvent plus être atteints à pied.",
@@ -1427,7 +1653,7 @@ function lineOptions(hass, config) {
   for (const line of config.lines) lines.add(String(line));
   return [...lines].sort((a, b) => a.localeCompare(b, void 0, { numeric: true })).map((line) => ({ value: line, label: line }));
 }
-function buildSchema2(hass, config) {
+function buildSchema3(hass, config) {
   return [
     {
       name: "entity",
@@ -1498,7 +1724,7 @@ function buildSchema2(hass, config) {
 }
 var NaolibCardEditor = class extends NaolibFormEditor {
   buildSchema(hass, config) {
-    return buildSchema2(hass, config);
+    return buildSchema3(hass, config);
   }
   // The direction selector works with strings, the config with numbers.
   toFormData(config) {
@@ -1509,8 +1735,8 @@ var NaolibCardEditor = class extends NaolibFormEditor {
   }
 };
 __publicField(NaolibCardEditor, "defaults", DEFAULT_CONFIG);
-__publicField(NaolibCardEditor, "labels", LABELS2);
-__publicField(NaolibCardEditor, "helpers", HELPERS2);
+__publicField(NaolibCardEditor, "labels", LABELS3);
+__publicField(NaolibCardEditor, "helpers", HELPERS3);
 
 // src/suggestions.js
 function suggest(predicate, type, label) {
@@ -1522,6 +1748,14 @@ var departureSuggestion = suggest(
   "Prochains départs"
 );
 var bikeSuggestion = suggest(isBikeEntity, "naolib-bike-card", "Station vélo");
+function aroundSuggestion(hass, entityId) {
+  return aroundSources(hass).includes(entityId) ? [
+    {
+      label: "Arrêts à proximité",
+      config: { type: "custom:naolib-around-card", entity: entityId }
+    }
+  ] : [];
+}
 
 // src/index.js
 function define(tag, elementClass) {
@@ -1535,6 +1769,8 @@ define("naolib-card", NaolibCard);
 define("naolib-card-editor", NaolibCardEditor);
 define("naolib-bike-card", NaolibBikeCard);
 define("naolib-bike-card-editor", NaolibBikeCardEditor);
+define("naolib-around-card", NaolibAroundCard);
+define("naolib-around-card-editor", NaolibAroundCardEditor);
 var CARDS = [
   {
     type: "naolib-card",
@@ -1549,6 +1785,13 @@ var CARDS = [
     preview: true,
     description: "Affiche les vélos et places disponibles d'une station Naolib et de ses voisines.",
     getEntitySuggestion: bikeSuggestion
+  },
+  {
+    type: "naolib-around-card",
+    name: "Naolib Autour de moi",
+    preview: true,
+    description: "Liste les arrêts proches d'une personne ou d'une zone, avec leurs prochains départs.",
+    getEntitySuggestion: aroundSuggestion
   }
 ];
 window.customCards = window.customCards || [];

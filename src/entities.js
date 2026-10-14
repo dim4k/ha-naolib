@@ -35,3 +35,24 @@ export function matchingEntities(hass, predicate, current) {
     if (current && !ids.includes(current)) ids.push(current);
     return ids;
 }
+
+// A nearby-stop sensor of an "around me" entry: a departures sensor that
+// also names the entity it follows.
+export function isAroundEntity(state) {
+    return isDepartureEntity(state) && typeof state.attributes.around_source === "string";
+}
+
+// The entities followed by an "around me" entry, in a stable order.
+export function aroundSources(hass) {
+    const sources = new Set();
+    for (const state of Object.values(hass?.states || {})) {
+        if (isAroundEntity(state)) sources.add(state.attributes.around_source);
+    }
+    return [...sources].sort();
+}
+
+export function aroundSensors(hass, source) {
+    return Object.values(hass?.states || {}).filter(
+        (state) => isAroundEntity(state) && state.attributes.around_source === source,
+    );
+}

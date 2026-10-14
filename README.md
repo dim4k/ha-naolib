@@ -93,6 +93,24 @@ tile per hour, scrolled to the current one. That view is theoretical only.
 | `show_timetable_button` | `true`  | Show the full timetable button                            |
 | `compact`               | `false` | One line per departure, without direction grouping        |
 
+### Around me — `custom:naolib-around-card`
+
+```yaml
+type: custom:naolib-around-card
+entity: person.me
+```
+
+Lists the stops of an "around me" entry, nearest first, with their next departures. `entity` is
+the person, zone or device tracker the entry follows.
+
+| Option       | Default | Description                                          |
+| ------------ | ------- | ---------------------------------------------------- |
+| `entity`     | —       | Entity followed by an "around me" entry (required)   |
+| `title`      | —       | Override the card title ("Autour de …" by default)   |
+| `departures` | `3`     | Departures shown per stop (1–10)                     |
+| `max_stops`  | `0`     | Maximum number of stops, `0` for all of them         |
+| `compact`    | `false` | Tighter layout                                       |
+
 ### Bike station — `custom:naolib-bike-card`
 
 ```yaml
