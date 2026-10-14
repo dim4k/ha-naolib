@@ -310,7 +310,7 @@ async def test_diagnostics(hass: HomeAssistant) -> None:
     assert diagnostics["coordinator"]["total_departures"] == 1
     assert diagnostics["timetables"]["generated_at"]
     assert diagnostics["timetables"]["calendar_end"]
-    assert diagnostics["frontend"]["loader_url"].startswith("/naolib_static/")
+    assert diagnostics["frontend"]["loader_url"] == "/api/naolib/loader.js"
 
 
 _BIKE_NETWORK = {
