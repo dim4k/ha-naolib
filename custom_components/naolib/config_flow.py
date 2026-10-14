@@ -14,6 +14,7 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -337,14 +338,14 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Offer the stops or stations just found in a searchable dropdown."""
         options = [
-            {
-                "value": place["id"],
-                "label": (
+            SelectOptionDict(
+                value=place["id"],
+                label=(
                     f"{place['name']} ({place['distance']} m)"
                     if "distance" in place
                     else place["name"]
                 ),
-            }
+            )
             for place in places
         ]
         return self.async_show_form(

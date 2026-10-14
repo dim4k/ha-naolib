@@ -25,7 +25,8 @@ def load_stops() -> list[dict[str, Any]]:
     """
     try:
         with _INDEX_PATH.open(encoding="utf-8") as fh:
-            return json.load(fh)
+            stops: list[dict[str, Any]] = json.load(fh)
+            return stops
     except (OSError, ValueError) as exception:
         _LOGGER.error("Could not read the embedded stop index: %s", exception)
         return []
