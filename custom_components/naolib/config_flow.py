@@ -8,6 +8,8 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsF
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
     LocationSelector,
     NumberSelector,
     NumberSelectorConfig,
@@ -21,18 +23,29 @@ import voluptuous as vol
 from .bike import GbfsUnavailableError, async_fetch_stations
 from .const import (
     CONF_ENTRY_TYPE,
+    CONF_EXCLUDED_STOPS,
     CONF_LOCATION,
+    CONF_MAX_STOPS,
     CONF_QUAYS,
+    CONF_RADIUS,
+    CONF_SOURCE_ENTITY,
     CONF_STATION_ID,
     CONF_STATION_LABEL,
     CONF_STOP_CODE,
     CONF_STOP_LABEL,
     CONF_UPDATE_INTERVAL,
+    DEFAULT_AROUND_MAX_STOPS,
+    DEFAULT_AROUND_RADIUS,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    ENTRY_TYPE_AROUND,
     ENTRY_TYPE_BIKE,
     ENTRY_TYPE_STOP,
+    MAX_AROUND_MAX_STOPS,
+    MAX_AROUND_RADIUS,
     MAX_UPDATE_INTERVAL,
+    MIN_AROUND_MAX_STOPS,
+    MIN_AROUND_RADIUS,
     MIN_UPDATE_INTERVAL,
 )
 from .stops import load_stops, nearby_stops, nearest, normalize
@@ -69,7 +82,7 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Choose how to look for a transit stop."""
         return self.async_show_menu(
             step_id="stop",
-            menu_options=["by_list", "by_location"],
+            menu_options=["by_list", "by_location", "around"],
         )
 
     async def async_step_bike(
@@ -131,6 +144,86 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="by_location", data_schema=schema, errors=errors
         )
+
+    async def async_step_around(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Follow a person/zone/device_tracker and expose the nearby stops."""
+        if user_input is not None:
+            source_entity = user_input[CONF_SOURCE_ENTITY]
+            return await self._async_save(
+                unique_id=f"around_{source_entity}",
+                title=f"Autour de : {self._entity_label(source_entity)}",
+                data={
+                    CONF_ENTRY_TYPE: ENTRY_TYPE_AROUND,
+                    CONF_SOURCE_ENTITY: source_entity,
+                    CONF_RADIUS: int(user_input[CONF_RADIUS]),
+                    CONF_MAX_STOPS: int(user_input[CONF_MAX_STOPS]),
+                    # Stops are removed by deleting their device; reconfiguring
+                    # keeps the ones already removed.
+                    CONF_EXCLUDED_STOPS: self._previous_exclusions(),
+                },
+            )
+
+        defaults = self._around_defaults()
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_SOURCE_ENTITY, default=defaults[CONF_SOURCE_ENTITY]
+                ): EntitySelector(
+                    EntitySelectorConfig(domain=["person", "zone", "device_tracker"])
+                ),
+                vol.Required(
+                    CONF_RADIUS, default=defaults[CONF_RADIUS]
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=MIN_AROUND_RADIUS,
+                        max=MAX_AROUND_RADIUS,
+                        step=50,
+                        unit_of_measurement="m",
+                        mode=NumberSelectorMode.SLIDER,
+                    )
+                ),
+                vol.Required(
+                    CONF_MAX_STOPS, default=defaults[CONF_MAX_STOPS]
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=MIN_AROUND_MAX_STOPS,
+                        max=MAX_AROUND_MAX_STOPS,
+                        step=1,
+                        mode=NumberSelectorMode.SLIDER,
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(step_id="around", data_schema=schema)
+
+    def _previous_exclusions(self) -> list[str]:
+        """Return the stops excluded by the entry being reconfigured, if any."""
+        if self.source != config_entries.SOURCE_RECONFIGURE:
+            return []
+        return list(self._get_reconfigure_entry().data.get(CONF_EXCLUDED_STOPS, []))
+
+    def _around_defaults(self) -> dict[str, Any]:
+        """Pre-fill the "around me" form, reusing a reconfigured entry."""
+        defaults: dict[str, Any] = {
+            CONF_SOURCE_ENTITY: "",
+            CONF_RADIUS: DEFAULT_AROUND_RADIUS,
+            CONF_MAX_STOPS: DEFAULT_AROUND_MAX_STOPS,
+        }
+        if self.source == config_entries.SOURCE_RECONFIGURE:
+            data = self._get_reconfigure_entry().data
+            for key in defaults:
+                if key in data:
+                    defaults[key] = data[key]
+        return defaults
+
+    def _entity_label(self, entity_id: str) -> str:
+        """Return a friendly name for an entity, falling back to its id."""
+        state = self.hass.states.get(entity_id)
+        if state is not None:
+            return state.name
+        return entity_id
 
     async def _async_fetch_stations(self) -> list[dict[str, Any]] | None:
         """Read the live station list, or None when the feed is unreachable."""
@@ -211,8 +304,11 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         orphan its entities instead of updating them.
         """
         entry = self._get_reconfigure_entry()
-        if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_BIKE:
+        entry_type = entry.data.get(CONF_ENTRY_TYPE)
+        if entry_type == ENTRY_TYPE_BIKE:
             return await self.async_step_bike(user_input)
+        if entry_type == ENTRY_TYPE_AROUND:
+            return await self.async_step_around(user_input)
         return await self.async_step_stop(user_input)
 
     async def async_step_select_stop(

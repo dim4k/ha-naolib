@@ -69,6 +69,31 @@ def nearby_stops(
     return nearest(load_stops(), lat, lon, limit)
 
 
+def within(
+    places: list[dict[str, Any]], lat: float, lon: float, radius: float, limit: int
+) -> list[dict[str, Any]]:
+    """Return the places within ``radius`` meters, nearest first, capped.
+
+    ``places`` are stops or bike stations: anything with ``lat`` and ``lon``.
+    """
+    scored = [
+        {**place, "distance": round(haversine(lat, lon, place["lat"], place["lon"]))}
+        for place in places
+    ]
+    scored.sort(key=lambda place: place["distance"])
+    return [place for place in scored if place["distance"] <= radius][:limit]
+
+
+def stops_within(
+    lat: float, lon: float, radius: float, limit: int
+) -> list[dict[str, Any]]:
+    """Return the stops within ``radius`` meters of a location.
+
+    This performs blocking file IO and must be called from an executor.
+    """
+    return within(load_stops(), lat, lon, radius, limit)
+
+
 def normalize(value: str) -> str:
     """Fold case and strip accents, so "Gare de l'Etat" sorts next to "l'État"."""
     decomposed = unicodedata.normalize("NFD", value.casefold())

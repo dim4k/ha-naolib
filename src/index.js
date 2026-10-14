@@ -1,7 +1,10 @@
+import { NaolibAroundCard } from "./around/card.js";
+import { NaolibAroundCardEditor } from "./around/editor.js";
 import { NaolibCard } from "./card.js";
 import { NaolibBikeCard } from "./bike/card.js";
 import { NaolibBikeCardEditor } from "./bike/editor.js";
 import { NaolibCardEditor } from "./editor.js";
+import { aroundSuggestion, bikeSuggestion, departureSuggestion } from "./suggestions.js";
 
 // The loader retries with a fresh query string, so this module can be
 // evaluated more than once per page: a second definition is not an error.
@@ -17,6 +20,8 @@ define("naolib-card", NaolibCard);
 define("naolib-card-editor", NaolibCardEditor);
 define("naolib-bike-card", NaolibBikeCard);
 define("naolib-bike-card-editor", NaolibBikeCardEditor);
+define("naolib-around-card", NaolibAroundCard);
+define("naolib-around-card-editor", NaolibAroundCardEditor);
 
 const CARDS = [
     {
@@ -24,6 +29,7 @@ const CARDS = [
         name: "Naolib Nantes",
         preview: true,
         description: "Affiche les prochains départs (Bus/Tram) pour un arrêt donné.",
+        getEntitySuggestion: departureSuggestion,
     },
     {
         type: "naolib-bike-card",
@@ -31,6 +37,15 @@ const CARDS = [
         preview: true,
         description:
             "Affiche les vélos et places disponibles d'une station Naolib et de ses voisines.",
+        getEntitySuggestion: bikeSuggestion,
+    },
+    {
+        type: "naolib-around-card",
+        name: "Naolib Autour de moi",
+        preview: true,
+        description:
+            "Liste les arrêts proches d'une personne ou d'une zone, avec leurs prochains départs.",
+        getEntitySuggestion: aroundSuggestion,
     },
 ];
 

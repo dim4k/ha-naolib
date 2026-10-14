@@ -11,14 +11,19 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.naolib.bike import GbfsUnavailableError
 from custom_components.naolib.const import (
     CONF_ENTRY_TYPE,
+    CONF_EXCLUDED_STOPS,
     CONF_LOCATION,
+    CONF_MAX_STOPS,
     CONF_QUAYS,
+    CONF_RADIUS,
+    CONF_SOURCE_ENTITY,
     CONF_STATION_ID,
     CONF_STATION_LABEL,
     CONF_STOP_CODE,
     CONF_STOP_LABEL,
     CONF_UPDATE_INTERVAL,
     DOMAIN,
+    ENTRY_TYPE_AROUND,
     ENTRY_TYPE_BIKE,
     ENTRY_TYPE_STOP,
 )
@@ -233,6 +238,106 @@ async def test_options_flow_sets_the_update_interval(hass: HomeAssistant) -> Non
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options == {CONF_UPDATE_INTERVAL: 120}
+
+
+def _around_entry(entity_id: str = "person.me") -> MockConfigEntry:
+    return MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=f"around_{entity_id}",
+        title=f"Autour de : {entity_id}",
+        data={
+            CONF_ENTRY_TYPE: ENTRY_TYPE_AROUND,
+            CONF_SOURCE_ENTITY: entity_id,
+            CONF_RADIUS: 500,
+            CONF_MAX_STOPS: 5,
+        },
+    )
+
+
+async def test_around_flow_creates_the_entry(hass: HomeAssistant) -> None:
+    """Picking a tracked entity creates an "around me" entry."""
+    hass.states.async_set(
+        "person.me", "home", {"friendly_name": "Me", "latitude": 1.0, "longitude": 2.0}
+    )
+
+    result = await _menu(hass, "stop", "around")
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "around"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_SOURCE_ENTITY: "person.me", CONF_RADIUS: 600, CONF_MAX_STOPS: 3},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Autour de : Me"
+    assert result["data"] == {
+        CONF_ENTRY_TYPE: ENTRY_TYPE_AROUND,
+        CONF_SOURCE_ENTITY: "person.me",
+        CONF_RADIUS: 600,
+        CONF_MAX_STOPS: 3,
+        CONF_EXCLUDED_STOPS: [],
+    }
+
+
+async def test_around_reconfigure_keeps_the_exclusions(hass: HomeAssistant) -> None:
+    """Stops removed before stay removed after a reconfiguration."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="around_person.me",
+        title="Autour de : person.me",
+        data={**_around_entry("person.me").data, CONF_EXCLUDED_STOPS: ["STOP2"]},
+    )
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_SOURCE_ENTITY: "person.me", CONF_RADIUS: 800, CONF_MAX_STOPS: 4},
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_EXCLUDED_STOPS] == ["STOP2"]
+    assert entry.data[CONF_RADIUS] == 800
+
+
+async def test_around_names_an_unknown_entity_by_its_id(
+    hass: HomeAssistant,
+) -> None:
+    """An entity without a state is named after its id."""
+    result = await _menu(hass, "stop", "around")
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_SOURCE_ENTITY: "person.ghost", CONF_RADIUS: 500, CONF_MAX_STOPS: 5},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Autour de : person.ghost"
+    assert result["data"][CONF_EXCLUDED_STOPS] == []
+
+
+async def test_around_reconfigure_updates_the_entry(hass: HomeAssistant) -> None:
+    """Reconfiguring an "around me" entry moves it to another entity."""
+    entry = _around_entry("person.me")
+    entry.add_to_hass(hass)
+    hass.states.async_set(
+        "person.other", "home", {"friendly_name": "Other", "latitude": 1.0}
+    )
+
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "around"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_SOURCE_ENTITY: "person.other", CONF_RADIUS: 400, CONF_MAX_STOPS: 2},
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_SOURCE_ENTITY] == "person.other"
+    assert entry.unique_id == "around_person.other"
 
 
 def _bike_entry(station_id: str = "1") -> MockConfigEntry:

@@ -3,6 +3,12 @@
 // "Configuration error" until a full reload. This module keeps retrying, and
 // waits for the element registry to be final before defining anything.
 
+import { installDeviceRemoval } from "./flow-devices.js";
+
+// Config flow helpers must work on the settings pages, where no card is
+// loaded: the loader is the module Home Assistant imports on every page.
+installDeviceRemoval();
+
 const CARD_URL = new URL(import.meta.url);
 CARD_URL.pathname = CARD_URL.pathname.replace(/[^/]*$/, "naolib-card.js");
 
