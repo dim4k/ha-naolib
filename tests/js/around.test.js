@@ -67,6 +67,15 @@ describe("prepareStops", () => {
         expect(stops[0].departures[0].seconds).toBe(120);
     });
 
+    it("drops the departures already gone", () => {
+        const gone = sensor("sensor.parti", "Parti", 1, [
+            { line: "1", destination: "Passé", expected_ts: at(-0.5) },
+            { line: "1", destination: "Futur", expected_ts: at(1) },
+        ]);
+        const [stop] = prepareStops([gone], config, NOW);
+        expect(stop.departures.map((d) => d.destination)).toEqual(["Futur"]);
+    });
+
     it("caps the number of stops", () => {
         const stops = prepareStops([FAR, NEAR], { ...config, max_stops: 1 }, NOW);
         expect(stops).toHaveLength(1);

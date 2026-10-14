@@ -428,7 +428,7 @@ function prepareStops(sensors, config, now = Date.now()) {
       line: departure.line,
       destination: departure.destination,
       seconds: (Date.parse(departure.expected_ts) - now) / 1e3
-    })).filter((departure) => Number.isFinite(departure.seconds)).filter((departure) => departure.seconds >= -60).slice(0, config.departures);
+    })).filter((departure) => Number.isFinite(departure.seconds)).filter((departure) => departure.seconds >= 0).slice(0, config.departures);
     return {
       entityId: state.entity_id,
       name: attributes.stop_label || attributes.friendly_name || "",

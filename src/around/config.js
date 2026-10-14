@@ -24,8 +24,9 @@ export function normalizeAroundConfig(config) {
 }
 
 // What the card shows: the stops nearest first, each with its next
-// departures counted down from `now`; departures gone for more than a
-// minute are dropped (the sensor refreshes less often than the card ticks).
+// departures counted down from `now`. Departures already gone are dropped,
+// like the departures card does (the sensor refreshes less often than the
+// card ticks, so it still lists them for a while).
 export function prepareStops(sensors, config, now = Date.now()) {
     const stops = sensors
         .map((state) => {
@@ -37,7 +38,7 @@ export function prepareStops(sensors, config, now = Date.now()) {
                     seconds: (Date.parse(departure.expected_ts) - now) / 1000,
                 }))
                 .filter((departure) => Number.isFinite(departure.seconds))
-                .filter((departure) => departure.seconds >= -60)
+                .filter((departure) => departure.seconds >= 0)
                 .slice(0, config.departures);
             return {
                 entityId: state.entity_id,
