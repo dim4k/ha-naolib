@@ -2,7 +2,7 @@
 
 from datetime import date, timedelta
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components import websocket_api
 from homeassistant.components.frontend import DATA_EXTRA_MODULE_URL, add_extra_js_url
@@ -30,7 +30,9 @@ from .const import (
     ATTR_WALK_TIME,
     CARD_URL_PATH,
     CONF_ENTRY_TYPE,
+    CONF_EXCLUDED_STOPS,
     CONF_QUAYS,
+    CONF_SOURCE_ENTITY,
     CONF_STATION_ID,
     CONF_STATION_LABEL,
     CONF_STOP_CODE,
@@ -38,6 +40,7 @@ from .const import (
     CONF_UPDATE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    ENTRY_TYPE_AROUND,
     ENTRY_TYPE_BIKE,
     LOADER_FILENAME,
     MAX_TIMETABLE_DAY_OFFSET,
@@ -52,6 +55,9 @@ from .coordinator import (
     filter_departures,
 )
 from .schedules import build_timetable, calendar_end
+
+if TYPE_CHECKING:
+    from homeassistant.helpers.device_registry import DeviceEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -80,6 +86,11 @@ def _is_bike(entry: ConfigEntry) -> bool:
     Entries created before bike support have no type and are stops.
     """
     return entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_BIKE
+
+
+def _is_around(entry: ConfigEntry) -> bool:
+    """Tell whether an entry follows a tracked entity ("around me")."""
+    return entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_AROUND
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -178,6 +189,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bo
     if _is_bike(entry):
         if not await _async_setup_bike_entry(hass, entry):
             return False
+    elif _is_around(entry):
+        if not await _async_setup_around_entry(hass, entry):
+            return False
     elif not await _async_setup_stop_entry(hass, entry):
         return False
 
@@ -228,6 +242,27 @@ async def _async_setup_stop_entry(
     # added later needs a refresh too, since the snapshot only holds the quays
     # that were registered when it was taken; the debouncer collapses the
     # requests fired when several entries are set up at once.
+    _schedule_refresh(hass, entry, coordinator)
+    entry.runtime_data = coordinator
+    return True
+
+
+async def _async_setup_around_entry(
+    hass: HomeAssistant, entry: NaolibConfigEntry
+) -> bool:
+    """Set up an "around me" entry.
+
+    The nearby stops are registered on the shared coordinator by the sensor
+    platform's controller, which also follows the tracked entity's moves; here
+    we only validate the configuration and expose the coordinator as runtime
+    data so the platform can reach it.
+    """
+    coordinator = hass.data[DOMAIN].coordinator
+
+    if not entry.data.get(CONF_SOURCE_ENTITY):
+        _LOGGER.error("Tracked entity missing from configuration")
+        return False
+
     _schedule_refresh(hass, entry, coordinator)
     entry.runtime_data = coordinator
     return True
@@ -325,6 +360,34 @@ def _timetable(
     return build_timetable(stop_code, day), calendar_end()
 
 
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: NaolibConfigEntry, device: "DeviceEntry"
+) -> bool:
+    """Allow deleting a nearby stop of an "around me" entry, to hide it.
+
+    The stop is added to the entry's exclusions, so it never comes back, even
+    when the tracked entity returns near it, and no other stop takes its slot.
+    Stops and bike stations of the other entries are what the entry is about:
+    they cannot be deleted alone.
+    """
+    if not _is_around(entry):
+        return False
+    prefix = f"around_{entry.entry_id}_"
+    codes = [
+        identifier.removeprefix(prefix)
+        for domain, identifier in device.identifiers
+        if domain == DOMAIN and identifier.startswith(prefix)
+    ]
+    if not codes:
+        return False
+    excluded = set(entry.data.get(CONF_EXCLUDED_STOPS, [])) | set(codes)
+    # Updating the entry reloads it, and the controller then skips the stop.
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_EXCLUDED_STOPS: sorted(excluded)}
+    )
+    return True
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bool:
     """Unload the integration and clean up resources.
 
@@ -336,6 +399,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> b
     if unloaded:
         if _is_bike(entry):
             hass.data[DOMAIN].bike_coordinator.unregister_station(entry.entry_id)
+        elif _is_around(entry):
+            # The controller unregisters its stops via entry.async_on_unload.
+            pass
         else:
             hass.data[DOMAIN].coordinator.unregister_stop(entry.entry_id)
     return unloaded

@@ -14,7 +14,8 @@
                 "description": "How do you want to pick the stop?",
                 "menu_options": {
                     "by_list": "Pick from the list",
-                    "by_location": "Search around a location"
+                    "by_location": "Search around a location",
+                    "around": "Around a person or zone (live)"
                 }
             },
             "bike": {
@@ -63,6 +64,20 @@
                 },
                 "data_description": {
                     "station_id": "Type a few letters to filter the list. The distance is shown when searching from the map."
+                }
+            },
+            "around": {
+                "title": "Around a tracked entity",
+                "description": "Follow a person, zone or device tracker. The stops within the radius become sensors and update as it moves.",
+                "data": {
+                    "source_entity": "Tracked entity",
+                    "radius": "Radius",
+                    "max_stops": "Maximum number of stops"
+                },
+                "data_description": {
+                    "source_entity": "Person, zone or device_tracker to follow (must expose GPS coordinates).",
+                    "radius": "Only stops within this distance are kept.",
+                    "max_stops": "At most this many of the closest stops become sensors."
                 }
             }
         },
@@ -147,4 +162,3 @@
         }
     }
 }
-
