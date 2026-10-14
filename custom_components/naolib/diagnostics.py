@@ -38,7 +38,7 @@ async def async_get_config_entry_diagnostics(
             ),
             **(
                 _bike_snapshot(coordinator)
-                if _is_bike(entry)
+                if isinstance(coordinator, NaolibBikeCoordinator)
                 else _stop_snapshot(coordinator)
             ),
         },

@@ -145,6 +145,11 @@
         "entry_wrong_type": {
             "message": "{target} est une station vélo : cette action ne s'applique qu'aux arrêts."
         }
+    },
+    "issues": {
+        "missing_quays": {
+            "title": "L'arrêt {stop} doit être ajouté de nouveau",
+            "description": "L'arrêt {stop} a été configuré avant le changement des identifiants d'arrêts Naolib : il n'a aucun quai et ne peut afficher aucun passage. Supprimez cette entrée puis ajoutez de nouveau l'arrêt."
+        }
     }
 }
-

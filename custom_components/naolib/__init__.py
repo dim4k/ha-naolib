@@ -15,7 +15,11 @@ from homeassistant.core import (
     SupportsResponse,
 )
 from homeassistant.exceptions import ServiceValidationError
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    issue_registry as ir,
+)
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 from homeassistant.util import dt as dt_util
@@ -204,11 +208,25 @@ async def _async_setup_stop_entry(
     if entry.unique_id is None:
         hass.config_entries.async_update_entry(entry, unique_id=stop_code)
 
-    if not quays:
+    issue_id = f"missing_quays_{entry.entry_id}"
+    if quays:
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
+    else:
         _LOGGER.warning(
             "Stop '%s' has no quays; please re-add it (the stop identifiers "
             "changed with the new Naolib API)",
             stop_code,
+        )
+        # Surface it in Settings > Repairs too: the entry stays loaded but can
+        # never show a departure until it is re-added.
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="missing_quays",
+            translation_placeholders={"stop": entry.title},
         )
 
     coordinator.register_stop(
@@ -222,6 +240,8 @@ async def _async_setup_stop_entry(
             ),
         ),
     )
+
+    _remove_stale_devices(hass, entry, (DOMAIN, stop_code))
 
     # The endpoint is rate-limited (1 request / 30 s), so setup must not fail or
     # retry on a transient 429 -- the coordinator will keep polling. A stop
@@ -255,9 +275,25 @@ async def _async_setup_bike_entry(
         ),
     )
 
+    _remove_stale_devices(hass, entry, (DOMAIN, f"bike_{station_id}"))
     _schedule_refresh(hass, entry, coordinator)
     entry.runtime_data = coordinator
     return True
+
+
+def _remove_stale_devices(
+    hass: HomeAssistant, entry: NaolibConfigEntry, identifier: tuple[str, str]
+) -> None:
+    """Drop the devices left behind by a previous stop or station.
+
+    Reconfiguring an entry moves it to another stop or station, whose device
+    has a new identifier; the old device would otherwise linger with an
+    orphaned entity.
+    """
+    device_registry = dr.async_get(hass)
+    for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
+        if identifier not in device.identifiers:
+            device_registry.async_remove_device(device.id)
 
 
 def _schedule_refresh(
@@ -290,7 +326,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: NaolibConfigEntry) 
 )
 @websocket_api.async_response
 async def handle_get_data(
-    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """Return the full timetable of a configured stop for one day.
 
@@ -339,3 +375,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> b
         else:
             hass.data[DOMAIN].coordinator.unregister_stop(entry.entry_id)
     return unloaded
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> None:
+    """Drop the repair issue of a deleted entry, if any."""
+    ir.async_delete_issue(hass, DOMAIN, f"missing_quays_{entry.entry_id}")
