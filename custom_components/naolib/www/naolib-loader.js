@@ -2,11 +2,112 @@
  * Sources live in src/; run `npm run build` after any change.
  */
 
-// src/flow-devices.js
+// src/flow-dialog.js
 var FLOW_DIALOG = "dialog-data-entry-flow";
-var CREATE_ENTRY_STEP = "step-flow-create-entry";
 var POLL_MS = 300;
+var APPEAR_MS = 3e3;
 var MAX_POLL_MS = 10 * 60 * 1e3;
+function findAll(root, localName, found = []) {
+  if (!root) return found;
+  if (root.localName === localName) found.push(root);
+  if (root.shadowRoot) findAll(root.shadowRoot, localName, found);
+  for (const child of root.children || []) findAll(child, localName, found);
+  return found;
+}
+var helpers = /* @__PURE__ */ new Set();
+var polling = null;
+var listening = false;
+function isOpen(app) {
+  return findAll(app, FLOW_DIALOG).some(
+    (dialog) => dialog.shadowRoot?.querySelector("ha-dialog")
+  );
+}
+function poll() {
+  if (polling) return;
+  const started = Date.now();
+  let seen = false;
+  polling = setInterval(() => {
+    const app = document.querySelector("home-assistant");
+    const open = isOpen(app);
+    seen || (seen = open);
+    const elapsed = Date.now() - started;
+    if (seen && !open || !seen && elapsed > APPEAR_MS || elapsed > MAX_POLL_MS) {
+      clearInterval(polling);
+      polling = null;
+      return;
+    }
+    for (const helper of helpers) {
+      try {
+        helper(app);
+      } catch (err) {
+        console.error("Naolib: config flow helper failed", err);
+      }
+    }
+  }, POLL_MS);
+}
+function whileFlowDialogOpen(helper) {
+  helpers.add(helper);
+  if (listening) return;
+  listening = true;
+  window.addEventListener(
+    "show-dialog",
+    (event) => {
+      if (event.detail?.dialogTag === FLOW_DIALOG) poll();
+    },
+    true
+  );
+  poll();
+}
+
+// src/flow-back.js
+var BACK_FIELD = "back";
+var MARK = "naolibBack";
+function backField(flowForm) {
+  if (flowForm?.step?.handler !== "naolib") return null;
+  const form = flowForm.shadowRoot?.querySelector("ha-form");
+  const fields = form?.shadowRoot?.querySelectorAll("ha-selector") || [];
+  return [...fields].find((field) => field.schema?.name === BACK_FIELD) || null;
+}
+function backButton(field, submit) {
+  const button = document.createElement("ha-button");
+  button.dataset[MARK] = "1";
+  button.slot = "secondaryAction";
+  button.setAttribute("appearance", "plain");
+  button.textContent = "Retour";
+  button.addEventListener("click", async () => {
+    const toggle = findAll(field, "ha-switch")[0];
+    if (!toggle) return;
+    if (!toggle.checked) toggle.click();
+    await new Promise((resolve) => setTimeout(resolve));
+    submit.click();
+  });
+  return button;
+}
+function update(app) {
+  for (const dialog of findAll(app, "dialog-data-entry-flow")) {
+    const footer = findAll(dialog, "ha-dialog-footer")[0];
+    if (!footer) continue;
+    const existing = footer.querySelector(`[data-naolib-back]`);
+    const field = backField(findAll(dialog, "step-flow-form")[0]);
+    const submit = footer.querySelector('[slot="primaryAction"]');
+    if (!field || !submit) {
+      existing?.remove();
+      continue;
+    }
+    field.style.display = "none";
+    if (existing && existing.naolibField === field) continue;
+    existing?.remove();
+    const button = backButton(field, submit);
+    button.naolibField = field;
+    footer.appendChild(button);
+  }
+}
+function installBackButton() {
+  whileFlowDialogOpen(update);
+}
+
+// src/flow-devices.js
+var CREATE_ENTRY_STEP = "step-flow-create-entry";
 function aroundStopDeviceIds(devices, entryId) {
   const prefix = `around_${entryId}_`;
   return new Set(
@@ -16,13 +117,6 @@ function aroundStopDeviceIds(devices, entryId) {
       )
     ).map((device) => device.id)
   );
-}
-function findAll(root, localName, found = []) {
-  if (!root) return found;
-  if (root.localName === localName) found.push(root);
-  if (root.shadowRoot) findAll(root.shadowRoot, localName, found);
-  for (const child of root.children || []) findAll(child, localName, found);
-  return found;
 }
 function removeButton(row, step, entryId) {
   const button = document.createElement("ha-icon-button");
@@ -72,34 +166,10 @@ function decorate(step) {
     }
   }
 }
-var polling = null;
-function watchFlowDialog() {
-  if (polling) return;
-  const started = Date.now();
-  let seen = false;
-  polling = setInterval(() => {
-    const app = document.querySelector("home-assistant");
-    const open = findAll(app, FLOW_DIALOG).length > 0;
-    seen || (seen = open);
-    if (seen && !open || Date.now() - started > MAX_POLL_MS) {
-      clearInterval(polling);
-      polling = null;
-      return;
-    }
+function installDeviceRemoval() {
+  whileFlowDialogOpen((app) => {
     for (const step of findAll(app, CREATE_ENTRY_STEP)) decorate(step);
-  }, POLL_MS);
-}
-var installed = false;
-function installDeviceRemoval(target = window) {
-  if (installed) return;
-  installed = true;
-  target.addEventListener(
-    "show-dialog",
-    (event) => {
-      if (event.detail?.dialogTag === FLOW_DIALOG) watchFlowDialog();
-    },
-    true
-  );
+  });
 }
 
 // src/flow-zone.js
@@ -142,16 +212,17 @@ function onValueChanged(event) {
   const value = withZoneLocation(flow.hass, event.detail?.value, zoneId);
   if (value) event.detail.value = value;
 }
-var installed2 = false;
+var installed = false;
 function installZoneFollower(target = document) {
-  if (installed2) return;
-  installed2 = true;
+  if (installed) return;
+  installed = true;
   target.addEventListener("value-changed", onValueChanged, true);
 }
 
 // src/loader.js
 installZoneFollower();
 installDeviceRemoval();
+installBackButton();
 var CARD_URL = new URL(import.meta.url);
 CARD_URL.pathname = CARD_URL.pathname.replace(/[^/]*$/, "naolib-card.js");
 var IMPORT_TIMEOUT_MS = 1e4;

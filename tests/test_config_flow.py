@@ -10,6 +10,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.naolib.bike import GbfsUnavailableError
 from custom_components.naolib.const import (
+    CONF_BACK,
     CONF_ENTRY_TYPE,
     CONF_EXCLUDED_STOPS,
     CONF_LOCATION,
@@ -561,7 +562,7 @@ async def test_the_zone_comes_first_on_the_position_page(hass: HomeAssistant) ->
     result = await _start(hass)
 
     keys = list(result["data_schema"].schema)
-    assert keys == [CONF_ZONE, CONF_LOCATION]
+    assert keys == [CONF_ZONE, CONF_LOCATION, CONF_BACK]
     assert keys[0].description == {"suggested_value": "zone.home"}
 
 
@@ -709,3 +710,115 @@ async def test_typed_text_must_match_a_station(hass: HomeAssistant) -> None:
     )
     assert result["step_id"] == "select_station"
     assert result["errors"] == {"base": "not_in_list"}
+
+
+async def _configure(hass: HomeAssistant, result: dict, data: dict) -> dict:
+    return await hass.config_entries.flow.async_configure(result["flow_id"], data)
+
+
+async def test_the_menus_lead_back_to_the_first_one(hass: HomeAssistant) -> None:
+    """Both second-level menus offer to go back to the first one."""
+    for kind in ("stop", "bike"):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result = await _configure(hass, result, {"next_step_id": kind})
+        assert "back_to_user" in result["menu_options"]
+
+        result = await _configure(hass, result, {"next_step_id": "back_to_user"})
+        assert result["step_id"] == "user"
+
+
+async def test_reconfiguring_has_no_way_back_to_the_first_menu(
+    hass: HomeAssistant,
+) -> None:
+    """A reconfigured entry keeps its kind, so it cannot go back that far."""
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+
+    assert "back_to_user" not in result["menu_options"]
+
+
+@pytest.mark.parametrize(
+    ("kind", "step"), [("stop", "by_location"), ("bike", "bike_by_location")]
+)
+async def test_the_position_page_goes_back_to_its_menu(
+    hass: HomeAssistant, kind: str, step: str
+) -> None:
+    """Going back from the position page shows the menu again."""
+    result = await _menu(hass, kind, step)
+
+    result = await _configure(hass, result, {CONF_BACK: True})
+
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == kind
+
+
+async def test_the_stop_list_goes_back_where_it_came_from(hass: HomeAssistant) -> None:
+    """From a map search, back is the map; from the full list, the menu."""
+    result = await _start(hass)
+    result = await _search(hass, result["flow_id"], _STOPS)
+    result = await _configure(hass, result, {CONF_BACK: True})
+    assert result["step_id"] == "by_location"
+
+    with patch("custom_components.naolib.config_flow.load_stops", return_value=_STOPS):
+        result = await _menu(hass, "stop", "by_list")
+    result = await _configure(hass, result, {CONF_BACK: True})
+    assert result["step_id"] == "stop"
+
+
+async def test_the_station_list_goes_back_where_it_came_from(
+    hass: HomeAssistant,
+) -> None:
+    """The bike station list goes back to its map, or to the bike menu."""
+    result = await _menu(hass, "bike", "bike_by_location")
+    with _patch_stations(_STATIONS):
+        result = await _configure(hass, result, _LOCATION)
+    result = await _configure(hass, result, {CONF_BACK: True})
+    assert result["step_id"] == "bike_by_location"
+
+    with _patch_stations(_STATIONS):
+        result = await _menu(hass, "bike", "bike_by_list")
+    result = await _configure(hass, result, {CONF_BACK: True})
+    assert result["step_id"] == "bike"
+
+
+async def test_a_list_sent_without_a_choice_is_reported(hass: HomeAssistant) -> None:
+    """The choice is optional for the back switch, so it is checked here."""
+    result = await _start(hass)
+    result = await _search(hass, result["flow_id"], _STOPS)
+
+    result = await _configure(hass, result, {})
+
+    assert result["errors"] == {"base": "not_in_list"}
+
+
+async def test_around_goes_back_to_the_stop_menu(hass: HomeAssistant) -> None:
+    """The "around me" page goes back to the stop menu."""
+    result = await _menu(hass, "stop", "around")
+    assert CONF_BACK in result["data_schema"].schema
+
+    result = await _configure(hass, result, {CONF_BACK: True})
+
+    assert result["step_id"] == "stop"
+
+
+async def test_around_requires_an_entity(hass: HomeAssistant) -> None:
+    """Without an entity, the "around me" page asks for one."""
+    result = await _menu(hass, "stop", "around")
+
+    result = await _configure(hass, result, {CONF_RADIUS: 500, CONF_MAX_STOPS: 5})
+
+    assert result["errors"] == {"base": "no_source_entity"}
+
+
+async def test_reconfiguring_around_has_no_back_switch(hass: HomeAssistant) -> None:
+    """Reconfiguring starts on the "around me" page: there is nothing before it."""
+    entry = _around_entry()
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+
+    assert CONF_BACK not in result["data_schema"].schema

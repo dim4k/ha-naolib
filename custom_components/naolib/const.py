@@ -14,6 +14,8 @@ CONF_STATION_ID: str = "station_id"
 CONF_STATION_LABEL: str = "station_label"
 CONF_LOCATION: str = "location"
 CONF_ZONE: str = "zone"
+# Optional switch on every form of the config flow to go back one step.
+CONF_BACK: str = "back"
 CONF_UPDATE_INTERVAL: str = "update_interval"
 CONF_SOURCE_ENTITY: str = "source_entity"
 CONF_RADIUS: str = "radius"
