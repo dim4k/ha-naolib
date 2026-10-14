@@ -37,7 +37,8 @@ def load_calendar() -> dict[str, dict[str, Any]]:
     if not path.exists():
         return {}
     with path.open(encoding="utf-8") as fh:
-        return json.load(fh)
+        calendar: dict[str, dict[str, Any]] = json.load(fh)
+        return calendar
 
 
 # A station's timetable is a few dozen kilobytes, and only the configured stops
@@ -67,7 +68,8 @@ def load_station_timetable(station_id: str) -> dict[str, dict[str, Any]]:
     if row is None:
         return {}
     try:
-        return json.loads(zlib.decompress(row[0]))
+        timetable: dict[str, dict[str, Any]] = json.loads(zlib.decompress(row[0]))
+        return timetable
     except (zlib.error, ValueError) as exception:
         _LOGGER.error("Corrupt timetable for station %s: %s", station_id, exception)
         return {}
