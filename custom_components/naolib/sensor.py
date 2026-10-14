@@ -144,17 +144,26 @@ class NaolibAroundDeparturesSensor(NaolibNextDeparturesSensor):
     """A nearby-stop sensor created on the fly by an "around me" entry.
 
     Its unique id and device are namespaced by the entry, so tracking the same
-    stop from a fixed entry and from an "around me" entry does not collide.
+    stop from a fixed entry and from an "around me" entry does not collide. It
+    also exposes the tracked entity and its distance to the stop, which is
+    what the "around me" card lists and sorts by.
     """
+
+    # The distance changes with every move: keep it out of the recorder too.
+    _unrecorded_attributes = frozenset({"next_departures", "distance"})
 
     def __init__(
         self,
         coordinator: NaolibGlobalCoordinator,
         stop: NaolibStop,
         entry_id: str,
+        source_entity: str,
+        distance: int,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator, stop)
+        self._source_entity = source_entity
+        self._distance = distance
         self._attr_unique_id = f"naolib_around_{entry_id}_{stop.code}_next"
         self._attr_device_info = DeviceInfo(
             identifiers={around_device_identifier(entry_id, stop.code)},
@@ -162,6 +171,24 @@ class NaolibAroundDeparturesSensor(NaolibNextDeparturesSensor):
             manufacturer="Naolib",
             model="Arrêt",
         )
+
+    @callback
+    def update_distance(self, distance: int) -> None:
+        """Record a new distance to the tracked entity."""
+        if distance == self._distance:
+            return
+        self._distance = distance
+        if self.hass is not None:
+            self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Add the tracked entity and the distance to it."""
+        return {
+            **super().extra_state_attributes,
+            "around_source": self._source_entity,
+            "distance": self._distance,
+        }
 
 
 class NaolibBikeStationSensor(CoordinatorEntity[NaolibBikeCoordinator], SensorEntity):

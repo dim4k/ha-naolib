@@ -118,6 +118,7 @@ class NaolibAroundController:
         new_entities: list[NaolibAroundDeparturesSensor] = []
         for key, stop in wanted.items():
             if key in self._stops:
+                self._entities[key].update_distance(stop["distance"])
                 continue
             naolib_stop = NaolibStop(
                 code=stop["id"],
@@ -128,7 +129,11 @@ class NaolibAroundController:
             self._stops[key] = naolib_stop
             self._coordinator.register_stop(key, naolib_stop)
             entity = NaolibAroundDeparturesSensor(
-                self._coordinator, naolib_stop, self._entry.entry_id
+                self._coordinator,
+                naolib_stop,
+                self._entry.entry_id,
+                self._source_entity,
+                stop["distance"],
             )
             self._entities[key] = entity
             new_entities.append(entity)
