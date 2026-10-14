@@ -35,3 +35,23 @@ export function matchingEntities(hass, predicate, current) {
     if (current && !ids.includes(current)) ids.push(current);
     return ids;
 }
+
+// What the "around me" card can follow: a person, zone or device tracker
+// that has GPS coordinates.
+const LOCATABLE_DOMAINS = ["person", "zone", "device_tracker"];
+
+export function isLocatable(entityId, state) {
+    return (
+        LOCATABLE_DOMAINS.includes(String(entityId).split(".")[0]) &&
+        typeof state?.attributes?.latitude === "number" &&
+        typeof state?.attributes?.longitude === "number"
+    );
+}
+
+// The default entity of a new card: a person if there is one.
+export function firstLocatable(hass) {
+    const ids = Object.keys(hass?.states || {})
+        .filter((entityId) => isLocatable(entityId, hass.states[entityId]))
+        .sort();
+    return ids.find((entityId) => entityId.startsWith("person.")) || ids[0];
+}

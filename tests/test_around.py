@@ -250,6 +250,38 @@ async def test_excluded_stops_are_never_shown(hass: HomeAssistant) -> None:
     assert codes == {key.split(":", 1)[1] for key in nearest[1:]}
 
 
+async def test_sensors_expose_the_source_and_distance(hass: HomeAssistant) -> None:
+    """Each nearby stop carries the tracked entity and its distance to it."""
+    _at(hass, _LAT, _LON)
+    entry = _entry()
+    await _setup(hass, entry)
+
+    states = [
+        hass.states.get(entity_id)
+        for entity_id in hass.states.async_entity_ids("sensor")
+    ]
+    assert states
+    assert all(state.attributes["around_source"] == _TRACKER for state in states)
+    before = {state.entity_id: state.attributes["distance"] for state in states}
+    assert all(0 <= distance <= 500 for distance in before.values())
+
+    # A small move keeps the same stops but changes their distance.
+    with _patch_api():
+        await _move(hass, _LAT + 0.001, _LON)
+        async_fire_time_changed(
+            hass, dt_util.utcnow() + timedelta(seconds=AROUND_DEBOUNCE + 1)
+        )
+        await hass.async_block_till_done()
+
+    after = {
+        entity_id: hass.states.get(entity_id).attributes["distance"]
+        for entity_id in before
+        if hass.states.get(entity_id) is not None
+    }
+    assert after
+    assert after != {entity_id: before[entity_id] for entity_id in after}
+
+
 async def test_deleting_a_stop_device_excludes_it(
     hass: HomeAssistant, hass_ws_client
 ) -> None:
