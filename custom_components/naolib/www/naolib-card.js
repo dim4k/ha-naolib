@@ -476,6 +476,48 @@ function prepareDepartures(departures2, config, now = Date.now()) {
   return out;
 }
 
+// src/directions.js
+var byLine = (a, b) => a.localeCompare(b, void 0, { numeric: true });
+function directionTermini(schedules, departures2, lines = []) {
+  const wanted = new Set(lines.map(String));
+  const termini = { 1: /* @__PURE__ */ new Map(), 2: /* @__PURE__ */ new Map() };
+  const add = (line, direction, destination) => {
+    line = String(line ?? "");
+    destination = String(destination ?? "").trim();
+    const byDirection = termini[Number(direction)];
+    if (!line || !destination || !byDirection) return;
+    if (wanted.size && !wanted.has(line)) return;
+    if (!byDirection.has(line)) byDirection.set(line, /* @__PURE__ */ new Set());
+    byDirection.get(line).add(destination);
+  };
+  for (const [key, group] of Object.entries(schedules || {})) {
+    const [line, direction] = key.split("|");
+    add(group?.ligne?.numLigne || line, direction, group?.ligne?.direction);
+  }
+  for (const departure of departures2 || []) {
+    add(departure.line, departure.direction, departure.destination);
+  }
+  return termini;
+}
+function directionLabel(termini, direction) {
+  const lines = termini[direction];
+  if (!lines?.size) return `Direction ${direction}`;
+  const linesByTerminus = /* @__PURE__ */ new Map();
+  for (const line of [...lines.keys()].sort(byLine)) {
+    const terminus = [...lines.get(line)].sort().join(" / ");
+    if (!linesByTerminus.has(terminus)) linesByTerminus.set(terminus, []);
+    linesByTerminus.get(terminus).push(line);
+  }
+  return [...linesByTerminus].map(([terminus, names]) => `${names.join(", ")} → ${terminus}`).join(" · ");
+}
+function directionHeading(departures2, direction) {
+  const destinations = new Set(
+    (departures2 || []).filter((item) => item.direction === direction && item.destination).map((item) => String(item.destination).trim())
+  );
+  if (!destinations.size) return `Direction ${direction}`;
+  return `Vers ${[...destinations].sort().join(" · ")}`;
+}
+
 // src/lines.js
 var LINE_COLORS = {
   "1": { bg: "#00a754", text: "#ffffff" },
@@ -664,7 +706,7 @@ function renderDepartures(departures2, stopCode, config) {
   const sections = [1, 2].filter(
     (direction) => departures2.some((item) => item.direction === direction)
   ).map(
-    (direction) => `<div class="tiles"><div class="tile-group">Direction ${direction}</div>${groupedTiles(departures2, direction, config)}</div>`
+    (direction) => `<div class="tiles"><div class="tile-group">${esc(directionHeading(departures2, direction))}</div>${groupedTiles(departures2, direction, config)}</div>`
   ).join("");
   return `${sections}${footerHtml(stopCode, config)}`;
 }
@@ -682,14 +724,14 @@ function renderTimetableHeader(extra = "") {
     `;
 }
 function groupSchedules(schedules, config) {
-  const byLine = /* @__PURE__ */ new Map();
+  const byLine2 = /* @__PURE__ */ new Map();
   for (const key of Object.keys(schedules || {})) {
     const [line, direction] = key.split("|");
     if (!matchesFilters(line, direction, config)) continue;
     const data = schedules[key];
     if (!data) continue;
-    if (!byLine.has(line)) byLine.set(line, { line, directions: [] });
-    byLine.get(line).directions.push({
+    if (!byLine2.has(line)) byLine2.set(line, { line, directions: [] });
+    byLine2.get(line).directions.push({
       key,
       line,
       direction: Number(direction),
@@ -697,7 +739,7 @@ function groupSchedules(schedules, config) {
       horaires: data.horaires || {}
     });
   }
-  return [...byLine.values()].sort(
+  return [...byLine2.values()].sort(
     (a, b) => String(a.line).localeCompare(String(b.line), void 0, { numeric: true })
   ).map((group) => ({
     ...group,
@@ -1418,6 +1460,20 @@ var HELPERS2 = {
   max_lines: "Nombre maximum de lignes affichées dans chaque sens. En mode compact, nombre maximum de départs affichés.",
   compact: "Une ligne par départ, sans regroupement par direction."
 };
+var timetablesByStop = /* @__PURE__ */ new Map();
+function directionOptions(hass, config) {
+  const attributes = hass.states[config.entity]?.attributes;
+  const termini = directionTermini(
+    timetablesByStop.get(attributes?.stop_code),
+    attributes?.next_departures,
+    config.lines
+  );
+  return [
+    { value: "0", label: "Les deux" },
+    { value: "1", label: directionLabel(termini, 1) },
+    { value: "2", label: directionLabel(termini, 2) }
+  ];
+}
 function lineOptions(hass, config) {
   const state = hass.states[config.entity];
   const departures2 = state?.attributes?.next_departures || [];
@@ -1461,11 +1517,7 @@ function buildSchema2(hass, config) {
       selector: {
         select: {
           mode: "dropdown",
-          options: [
-            { value: "0", label: "Les deux" },
-            { value: "1", label: "Direction 1" },
-            { value: "2", label: "Direction 2" }
-          ]
+          options: directionOptions(hass, config)
         }
       }
     },
@@ -1506,6 +1558,21 @@ var NaolibCardEditor = class extends NaolibFormEditor {
   }
   fromFormData(config, value) {
     return { ...config, ...value, direction: Number(value.direction ?? 0) };
+  }
+  _render() {
+    this._fetchTimetable();
+    super._render();
+  }
+  // Fetch the stop's timetable once, then draw the form again with it.
+  _fetchTimetable() {
+    const stopCode = this._hass?.states[this._config?.entity]?.attributes?.stop_code;
+    if (!stopCode || timetablesByStop.has(stopCode)) return;
+    timetablesByStop.set(stopCode, void 0);
+    this._hass.callWS({ type: "naolib/get_data", stop_code: stopCode }).then((data) => {
+      timetablesByStop.set(stopCode, data?.schedules || {});
+      super._render();
+    }).catch(() => {
+    });
   }
 };
 __publicField(NaolibCardEditor, "defaults", DEFAULT_CONFIG);

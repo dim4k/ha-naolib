@@ -1,4 +1,5 @@
 import { esc } from "../html.js";
+import { directionHeading } from "../directions.js";
 import { lineBadge, modeLabel } from "../lines.js";
 import { message } from "./shared.js";
 import { formatClock } from "../time.js";
@@ -155,7 +156,7 @@ export function renderDepartures(departures, stopCode, config) {
         )
         .map(
             (direction) =>
-                `<div class="tiles"><div class="tile-group">Direction ${direction}</div>${groupedTiles(departures, direction, config)}</div>`,
+                `<div class="tiles"><div class="tile-group">${esc(directionHeading(departures, direction))}</div>${groupedTiles(departures, direction, config)}</div>`,
         )
         .join("");
 

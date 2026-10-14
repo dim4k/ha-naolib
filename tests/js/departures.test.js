@@ -54,10 +54,14 @@ describe("renderDepartures", () => {
         expect(html).toContain("12 mn");
     });
 
-    it("renders a section per direction", () => {
-        const html = render([departure(), departure({ direction: 2 })]);
-        expect(html).toContain("Direction 1");
-        expect(html).toContain("Direction 2");
+    it("renders a section per direction, named after its termini", () => {
+        const html = render([
+            departure(),
+            departure({ direction: 2, destination: "François Mitterrand" }),
+        ]);
+        expect(html).toContain("Vers Beaujoire");
+        expect(html).toContain("Vers François Mitterrand");
+        expect(html).not.toContain("Direction 1");
     });
 
     it("colours the countdown by urgency", () => {
