@@ -19,7 +19,7 @@ export const base = `
     .card-header { padding: 16px; font-weight: bold; font-size: 1.2em; display: flex; align-items: center; }
     .icon { margin-right: 10px; color: var(--primary-color); }
     .badge { font-weight: bold; padding: 4px 8px; border-radius: 6px; min-width: 25px; text-align: center; margin-right: 12px; font-size: 1.1em; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
-    .no-bus { padding: 10px 16px; font-style: italic; color: var(--secondary-text-color); text-align: center; }
+    .message { padding: 10px 16px; font-style: italic; color: var(--secondary-text-color); text-align: center; }
     .time { font-weight: bold; font-size: 1.1em; padding: 4px 8px; border-radius: 4px; white-space: nowrap; background: var(--naolib-neutral); color: var(--primary-text-color); }
     .urgent { background-color: rgba(231, 76, 60, 0.2); color: var(--naolib-urgent); }
     .warning { background-color: rgba(241, 196, 15, 0.2); color: var(--naolib-warning); }

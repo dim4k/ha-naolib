@@ -5,6 +5,21 @@ var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
+// src/constants.js
+var ID_SCHEDULE_BTN = "schedule-btn";
+var ID_BACK_BTN = "back-btn";
+var ATTR_LINE = "data-line";
+var ATTR_DIRECTION = "data-direction";
+var ATTR_DAY = "data-day";
+var MAX_DAY_OFFSET = 6;
+var ATTR_KEEP_SCROLL = "data-keep-scroll";
+var MS_PER_MINUTE = 6e4;
+var TICK_MS = 2e4;
+var URGENT_MINUTES = 1;
+var WARNING_MINUTES = 3;
+var DELAY_TOLERANCE_MINUTES = 2;
+var SERVICE_DAY_CUTOFF_HOUR = 4;
+
 // src/entities.js
 function isDepartureEntity(state) {
   return !!state && state.attributes.stop_code !== void 0 && Array.isArray(state.attributes.next_departures);
@@ -25,11 +40,11 @@ function matchingEntities(hass, predicate, current) {
   return ids;
 }
 var LOCATABLE_DOMAINS = ["person", "zone", "device_tracker"];
-function isLocatable(entityId, state) {
-  return LOCATABLE_DOMAINS.includes(String(entityId).split(".")[0]) && typeof state?.attributes?.latitude === "number" && typeof state?.attributes?.longitude === "number";
+function isLocatable(state) {
+  return LOCATABLE_DOMAINS.includes(String(state?.entity_id).split(".")[0]) && typeof state?.attributes?.latitude === "number" && typeof state?.attributes?.longitude === "number";
 }
 function firstLocatable(hass) {
-  const ids = Object.keys(hass?.states || {}).filter((entityId) => isLocatable(entityId, hass.states[entityId])).sort();
+  const ids = Object.keys(hass?.states || {}).filter((entityId) => isLocatable(hass.states[entityId])).sort();
   return ids.find((entityId) => entityId.startsWith("person.")) || ids[0];
 }
 
@@ -46,10 +61,19 @@ function esc(value) {
     })[c]
   );
 }
+function errorText(err) {
+  return esc(err?.message || err?.code || err);
+}
 
 // src/render/shared.js
+var LOADING = "Chargement...";
 function message(html) {
-  return `<div class="no-bus">${html}</div>`;
+  return `<div class="message">${html}</div>`;
+}
+function timeClass(minutes) {
+  if (minutes <= URGENT_MINUTES) return "time urgent";
+  if (minutes <= WARNING_MINUTES) return "time warning";
+  return "time";
 }
 
 // src/styles/around.js
@@ -93,7 +117,7 @@ var base = `
     .card-header { padding: 16px; font-weight: bold; font-size: 1.2em; display: flex; align-items: center; }
     .icon { margin-right: 10px; color: var(--primary-color); }
     .badge { font-weight: bold; padding: 4px 8px; border-radius: 6px; min-width: 25px; text-align: center; margin-right: 12px; font-size: 1.1em; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
-    .no-bus { padding: 10px 16px; font-style: italic; color: var(--secondary-text-color); text-align: center; }
+    .message { padding: 10px 16px; font-style: italic; color: var(--secondary-text-color); text-align: center; }
     .time { font-weight: bold; font-size: 1.1em; padding: 4px 8px; border-radius: 4px; white-space: nowrap; background: var(--naolib-neutral); color: var(--primary-text-color); }
     .urgent { background-color: rgba(231, 76, 60, 0.2); color: var(--naolib-urgent); }
     .warning { background-color: rgba(241, 196, 15, 0.2); color: var(--naolib-warning); }
@@ -258,6 +282,25 @@ var NaolibBaseCard = class extends HTMLElement {
   static getStubConfig(hass) {
     return { entity: findEntity(hass, this.acceptsEntity) || "" };
   }
+  connectedCallback() {
+    if (!this.constructor.ticks || this._ticker) return;
+    this._ticker = setInterval(() => {
+      if (!this._hasData() || !this.content) return;
+      try {
+        this._render();
+      } catch (err) {
+        console.error(`${this.constructor.logLabel}: render failed`, err);
+      }
+    }, TICK_MS);
+  }
+  disconnectedCallback() {
+    clearInterval(this._ticker);
+    this._ticker = null;
+  }
+  // Whether there is anything to draw yet.
+  _hasData() {
+    return Boolean(this._state);
+  }
   setConfig(config) {
     this.config = this.constructor.normalizeConfig(config);
     this.toggleAttribute("compact", this.config.compact);
@@ -272,7 +315,7 @@ var NaolibBaseCard = class extends HTMLElement {
       console.error(`${this.constructor.logLabel} error:`, err);
       try {
         if (!this.content) this._initShadowDom();
-        this._message(`Erreur : ${esc(err?.message || err)}`);
+        this._message(`Erreur : ${errorText(err)}`);
       } catch (renderErr) {
         console.error(
           `${this.constructor.logLabel}: cannot render error state`,
@@ -352,22 +395,9 @@ __publicField(NaolibBaseCard, "icon", "");
 __publicField(NaolibBaseCard, "defaultTitle", "");
 __publicField(NaolibBaseCard, "noEntityMessage", "");
 __publicField(NaolibBaseCard, "logLabel", "Naolib card");
-
-// src/constants.js
-var ID_SCHEDULE_BTN = "schedule-btn";
-var ID_BACK_BTN = "back-btn";
-var ATTR_LINE = "data-line";
-var ATTR_DIRECTION = "data-direction";
-var ATTR_DAY = "data-day";
-var MAX_DAY_OFFSET = 6;
-var ATTR_KEEP_SCROLL = "data-keep-scroll";
-var MS_PER_MINUTE = 6e4;
-var TICK_MS = 2e4;
-var URGENT_MINUTES = 1;
-var WARNING_MINUTES = 3;
-var DELAY_TOLERANCE_MINUTES = 2;
-var STALE_SECONDS = 60;
-var SERVICE_DAY_CUTOFF_HOUR = 4;
+// Cards counting departures down redraw on a timer between two updates,
+// so the countdowns (and "proche") stay on time instead of aging.
+__publicField(NaolibBaseCard, "ticks", false);
 
 // src/validate.js
 function configValidator(cardType) {
@@ -387,10 +417,14 @@ function configValidator(cardType) {
       if (typeof value !== "boolean") invalid(`"${name}" doit être vrai ou faux`);
       return value;
     },
-    // Merge the defaults and check the options every card has.
+    // Merge the defaults and check the options every card has. A `null`
+    // option stands for "not set", like a missing one.
     base(config, defaults) {
       if (config && typeof config !== "object") invalid("configuration invalide");
-      const raw = { ...defaults, ...config || {} };
+      const raw = { ...defaults };
+      for (const [key, value] of Object.entries(config || {})) {
+        if (value !== null && value !== void 0) raw[key] = value;
+      }
       if (typeof raw.entity !== "string") invalid('"entity" doit être une entité');
       if (typeof raw.title !== "string") invalid('"title" doit être du texte');
       return raw;
@@ -579,15 +613,9 @@ function passageDate(now, hour, minute) {
 }
 
 // src/around/render.js
-function timeClass(seconds) {
-  const minutes = seconds / 60;
-  if (minutes <= URGENT_MINUTES) return "time urgent";
-  if (minutes <= WARNING_MINUTES) return "time warning";
-  return "time";
-}
 function directionHtml(direction) {
   const times = direction.seconds.map(
-    (seconds) => `<div class="${timeClass(seconds)}">${esc(humanizeSeconds(seconds))}</div>`
+    (seconds) => `<div class="${timeClass(Math.floor(seconds / 60))}">${esc(humanizeSeconds(seconds))}</div>`
   ).join("");
   return `
         <div class="around-departure">
@@ -629,22 +657,16 @@ var NaolibAroundCard = class extends NaolibBaseCard {
     return { entity: firstLocatable(hass) || "" };
   }
   connectedCallback() {
-    if (!this._ticker) {
-      this._ticker = setInterval(() => {
-        if (!this._data || !this.content) return;
-        try {
-          this._render();
-        } catch (err) {
-          console.error("Naolib around card: render failed", err);
-        }
-      }, TICK_MS);
-    }
+    super.connectedCallback();
     this._subscribe();
   }
   disconnectedCallback() {
-    clearInterval(this._ticker);
-    this._ticker = null;
+    super.disconnectedCallback();
     this._unsubscribe();
+  }
+  // The stops come from the subscription, not from an entity state.
+  _hasData() {
+    return Boolean(this._data);
   }
   _updateFromHass(hass) {
     if (!hass) return;
@@ -658,7 +680,7 @@ var NaolibAroundCard = class extends NaolibBaseCard {
     this._name = hass.states[entity]?.attributes?.friendly_name || entity;
     this._updateTitle(this.config.title || `Autour de ${this._name}`);
     this._subscribe();
-    if (!this._data) this._message("Chargement...");
+    if (!this._data) this._message(LOADING);
   }
   // One subscription per entity, radius and number of stops; a new
   // configuration replaces it.
@@ -691,7 +713,7 @@ var NaolibAroundCard = class extends NaolibBaseCard {
       console.error("Naolib around card: subscription failed", err);
       if (this.content) {
         this._message(
-          `Impossible de suivre ${esc(this._name || entity)} : l'intégration Naolib est-elle installée avec au moins une entrée ? (${esc(err?.message || err?.code || err)})`
+          `Impossible de suivre ${esc(this._name || entity)} : l'intégration Naolib est-elle installée avec au moins une entrée ? (${errorText(err)})`
         );
       }
     }
@@ -727,6 +749,8 @@ __publicField(NaolibAroundCard, "icon", "mdi:map-marker-radius");
 __publicField(NaolibAroundCard, "defaultTitle", "Arrêts à proximité");
 __publicField(NaolibAroundCard, "noEntityMessage", "Choisissez une personne, une zone ou un traceur à suivre dans l'éditeur de la carte.");
 __publicField(NaolibAroundCard, "logLabel", "Naolib around card");
+// Counts the departures down between two pushes from the integration.
+__publicField(NaolibAroundCard, "ticks", true);
 
 // src/form-editor.js
 var NaolibFormEditor = class extends HTMLElement {
@@ -813,7 +837,7 @@ function buildSchema() {
       name: "entity",
       required: true,
       selector: {
-        entity: { filter: [{ domain: ["person", "zone", "device_tracker"] }] }
+        entity: { filter: [{ domain: LOCATABLE_DOMAINS }] }
       }
     },
     { name: "title", selector: { text: {} } },
@@ -875,20 +899,14 @@ var check2 = configValidator("naolib-card");
 function normalizeConfig(config) {
   const raw = check2.base(config, DEFAULT_CONFIG);
   let lines = raw.lines;
-  if (lines === null || lines === void 0) lines = [];
   if (typeof lines === "string" || typeof lines === "number") lines = [lines];
   if (!Array.isArray(lines)) check2.invalid('"lines" doit être une liste de lignes');
   return {
     ...raw,
     lines: lines.map((line) => String(line)),
-    direction: check2.integer(raw.direction ?? 0, "direction", 0, 2),
-    walk_time: check2.integer(raw.walk_time ?? 0, "walk_time", 0, MAX_WALK_TIME),
-    max_lines: check2.integer(
-      raw.max_lines ?? DEFAULT_CONFIG.max_lines,
-      "max_lines",
-      1,
-      MAX_LINES_LIMIT
-    ),
+    direction: check2.integer(raw.direction, "direction", 0, 2),
+    walk_time: check2.integer(raw.walk_time, "walk_time", 0, MAX_WALK_TIME),
+    max_lines: check2.integer(raw.max_lines, "max_lines", 1, MAX_LINES_LIMIT),
     show_timetable_button: check2.boolean(
       raw.show_timetable_button,
       "show_timetable_button"
@@ -913,7 +931,6 @@ function prepareDepartures(departures2, config, now = Date.now()) {
     if (Number.isNaN(timestamp)) continue;
     if (timestamp < earliest) continue;
     const delta = (timestamp - now) / 1e3;
-    if (delta < -STALE_SECONDS) continue;
     out.push({
       ...departure,
       time: humanizeSeconds(delta),
@@ -968,11 +985,6 @@ function directionHeading(departures2, direction) {
 }
 
 // src/render/departures.js
-function timeClass2(minutes) {
-  if (minutes <= URGENT_MINUTES) return "time urgent";
-  if (minutes <= WARNING_MINUTES) return "time warning";
-  return "time";
-}
 function clocksHtml(item) {
   const expected = Date.parse(item.expected_ts);
   if (Number.isNaN(expected)) return "";
@@ -1019,7 +1031,7 @@ function stripHtml(first, second) {
     `;
 }
 function tileHtml(first, second) {
-  const countdown = `<div class="${timeClass2(first.minutes)}">${esc(first.time)}</div>`;
+  const countdown = `<div class="${timeClass(first.minutes)}">${esc(first.time)}</div>`;
   return `
         <div class="tile">
             ${tileRow(first, countdown)}
@@ -1031,7 +1043,7 @@ function compactTileHtml(departure) {
   const expected = Date.parse(departure.expected_ts);
   const title = Number.isNaN(expected) ? "" : ` title="${formatClock(new Date(expected))}"`;
   const mark = departure.is_last ? `<span class="mark">dernier</span>` : "";
-  const countdown = `<div class="${timeClass2(departure.minutes)}"${title}>${esc(departure.time)}</div>`;
+  const countdown = `<div class="${timeClass(departure.minutes)}"${title}>${esc(departure.time)}</div>`;
   return `<div class="tile">${tileRow(departure, `${mark}${countdown}`)}</div>`;
 }
 function groupedTiles(departures2, direction, config) {
@@ -1303,23 +1315,6 @@ var NaolibCard = class extends NaolibBaseCard {
   static getConfigElement() {
     return document.createElement("naolib-card-editor");
   }
-  connectedCallback() {
-    if (this._ticker) return;
-    this._ticker = setInterval(() => {
-      if (!this._state || !this.content) return;
-      try {
-        this._render();
-      } catch (err) {
-        console.error("Naolib card: render failed", err);
-      }
-    }, TICK_MS);
-  }
-  disconnectedCallback() {
-    if (this._ticker) {
-      clearInterval(this._ticker);
-      this._ticker = null;
-    }
-  }
   // Replacing innerHTML wholesale loses the scroll position of the timetable
   // containers, which the 20 s ticker would then reset on every pass.
   _setContent(html) {
@@ -1385,7 +1380,7 @@ var NaolibCard = class extends NaolibBaseCard {
       console.error("Error fetching Naolib schedules:", err);
       if (this._showSchedule) {
         this.content.innerHTML = `${renderTimetableHeader()}${message(
-          `Erreur de chargement des horaires : ${esc(err?.message || err)}`
+          `Erreur de chargement des horaires : ${errorText(err)}`
         )}`;
       }
     }).finally(() => {
@@ -1449,7 +1444,7 @@ var NaolibCard = class extends NaolibBaseCard {
   }
   _render() {
     if (!this._state) {
-      this._message("Chargement...");
+      this._message(LOADING);
       return;
     }
     const config = this.config;
@@ -1494,6 +1489,8 @@ __publicField(NaolibCard, "icon", "mdi:bus-clock");
 __publicField(NaolibCard, "defaultTitle", "Arrêt Naolib");
 __publicField(NaolibCard, "noEntityMessage", "Aucune entité Naolib trouvée. Ajoutez l'intégration via Paramètres &gt; Appareils et services.");
 __publicField(NaolibCard, "logLabel", "Naolib card");
+// The timetable view ticks too: its clock and countdowns would drift.
+__publicField(NaolibCard, "ticks", true);
 
 // src/bike/config.js
 var DEFAULT_BIKE_CONFIG = {
@@ -1513,14 +1510,9 @@ function normalizeBikeConfig(config) {
   const raw = check3.base(config, DEFAULT_BIKE_CONFIG);
   return {
     ...raw,
-    nearby_count: check3.integer(
-      raw.nearby_count ?? DEFAULT_BIKE_CONFIG.nearby_count,
-      "nearby_count",
-      0,
-      MAX_NEARBY_COUNT
-    ),
+    nearby_count: check3.integer(raw.nearby_count, "nearby_count", 0, MAX_NEARBY_COUNT),
     nearby_radius: check3.integer(
-      raw.nearby_radius ?? DEFAULT_BIKE_CONFIG.nearby_radius,
+      raw.nearby_radius,
       "nearby_radius",
       0,
       MAX_NEARBY_RADIUS
@@ -1644,7 +1636,7 @@ var NaolibBikeCard = class extends NaolibBaseCard {
   }
   _render() {
     if (!this._state) {
-      this._message("Chargement...");
+      this._message(LOADING);
       return;
     }
     this.content.innerHTML = renderBikeStation(
@@ -1886,14 +1878,11 @@ var departureSuggestion = suggest(
   "Prochains départs"
 );
 var bikeSuggestion = suggest(isBikeEntity, "naolib-bike-card", "Station vélo");
-function aroundSuggestion(hass, entityId) {
-  return isLocatable(entityId, hass.states[entityId]) ? [
-    {
-      label: "Arrêts à proximité",
-      config: { type: "custom:naolib-around-card", entity: entityId }
-    }
-  ] : [];
-}
+var aroundSuggestion = suggest(
+  isLocatable,
+  "naolib-around-card",
+  "Arrêts à proximité"
+);
 
 // src/index.js
 function define(tag, elementClass) {

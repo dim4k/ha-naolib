@@ -31,15 +31,20 @@ const STOPS = [
     { code: "S2", name: "Bouffay", distance: 300, departures: [] },
 ];
 
-const located = { attributes: { latitude: 47.2, longitude: -1.5 } };
+const located = (entityId) => ({
+    entity_id: entityId,
+    attributes: { latitude: 47.2, longitude: -1.5 },
+});
 const HASS = {
-    states: {
-        "device_tracker.phone": located,
-        "person.me": located,
-        "zone.home": located,
-        "person.unknown": { attributes: {} },
-        "sensor.gps": located,
-    },
+    states: Object.fromEntries(
+        [
+            located("device_tracker.phone"),
+            located("person.me"),
+            located("zone.home"),
+            { entity_id: "person.unknown", attributes: {} },
+            located("sensor.gps"),
+        ].map((state) => [state.entity_id, state]),
+    ),
 };
 
 describe("normalizeAroundConfig", () => {
@@ -50,6 +55,13 @@ describe("normalizeAroundConfig", () => {
             max_stops: 5,
             departures: 3,
             compact: false,
+        });
+    });
+
+    it("reads a null option as not set", () => {
+        expect(normalizeAroundConfig({ radius: null, max_stops: null })).toMatchObject({
+            radius: 500,
+            max_stops: 5,
         });
     });
 
@@ -111,10 +123,11 @@ describe("rendering", () => {
 
 describe("locatable entities", () => {
     it("accepts persons, zones and trackers with coordinates", () => {
-        expect(isLocatable("device_tracker.phone", located)).toBe(true);
-        expect(isLocatable("zone.home", located)).toBe(true);
-        expect(isLocatable("person.unknown", HASS.states["person.unknown"])).toBe(false);
-        expect(isLocatable("sensor.gps", located)).toBe(false);
+        expect(isLocatable(HASS.states["device_tracker.phone"])).toBe(true);
+        expect(isLocatable(HASS.states["zone.home"])).toBe(true);
+        expect(isLocatable(HASS.states["person.unknown"])).toBe(false);
+        expect(isLocatable(HASS.states["sensor.gps"])).toBe(false);
+        expect(isLocatable(undefined)).toBe(false);
     });
 
     it("prefers a person for a new card", () => {

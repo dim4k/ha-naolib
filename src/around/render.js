@@ -1,14 +1,7 @@
-import { URGENT_MINUTES, WARNING_MINUTES } from "../constants.js";
 import { esc } from "../html.js";
 import { lineBadge } from "../lines.js";
+import { timeClass } from "../render/shared.js";
 import { humanizeSeconds } from "../time.js";
-
-function timeClass(seconds) {
-    const minutes = seconds / 60;
-    if (minutes <= URGENT_MINUTES) return "time urgent";
-    if (minutes <= WARNING_MINUTES) return "time warning";
-    return "time";
-}
 
 // One row per line and terminus, its next passages side by side, the
 // soonest on the left.
@@ -16,7 +9,7 @@ function directionHtml(direction) {
     const times = direction.seconds
         .map(
             (seconds) =>
-                `<div class="${timeClass(seconds)}">${esc(humanizeSeconds(seconds))}</div>`,
+                `<div class="${timeClass(Math.floor(seconds / 60))}">${esc(humanizeSeconds(seconds))}</div>`,
         )
         .join("");
     return `

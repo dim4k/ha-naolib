@@ -1,5 +1,6 @@
+import { TICK_MS } from "./constants.js";
 import { findEntity } from "./entities.js";
-import { esc } from "./html.js";
+import { errorText, esc } from "./html.js";
 import { message } from "./render/shared.js";
 import { styles } from "./styles/index.js";
 
@@ -17,6 +18,9 @@ export class NaolibBaseCard extends HTMLElement {
     static defaultTitle = "";
     static noEntityMessage = "";
     static logLabel = "Naolib card";
+    // Cards counting departures down redraw on a timer between two updates,
+    // so the countdowns (and "proche") stay on time instead of aging.
+    static ticks = false;
 
     // `hass` can be set before `setConfig` (mobile reconnections), so the card
     // always carries a usable configuration.
@@ -24,6 +28,28 @@ export class NaolibBaseCard extends HTMLElement {
 
     static getStubConfig(hass) {
         return { entity: findEntity(hass, this.acceptsEntity) || "" };
+    }
+
+    connectedCallback() {
+        if (!this.constructor.ticks || this._ticker) return;
+        this._ticker = setInterval(() => {
+            if (!this._hasData() || !this.content) return;
+            try {
+                this._render();
+            } catch (err) {
+                console.error(`${this.constructor.logLabel}: render failed`, err);
+            }
+        }, TICK_MS);
+    }
+
+    disconnectedCallback() {
+        clearInterval(this._ticker);
+        this._ticker = null;
+    }
+
+    // Whether there is anything to draw yet.
+    _hasData() {
+        return Boolean(this._state);
     }
 
     setConfig(config) {
@@ -48,7 +74,7 @@ export class NaolibBaseCard extends HTMLElement {
             console.error(`${this.constructor.logLabel} error:`, err);
             try {
                 if (!this.content) this._initShadowDom();
-                this._message(`Erreur : ${esc(err?.message || err)}`);
+                this._message(`Erreur : ${errorText(err)}`);
             } catch (renderErr) {
                 // The fallback rendering must not throw either.
                 console.error(

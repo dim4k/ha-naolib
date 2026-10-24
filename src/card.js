@@ -1,10 +1,10 @@
 import { NaolibBaseCard } from "./base-card.js";
 import { normalizeConfig, prepareDepartures } from "./config.js";
 import { isDepartureEntity } from "./entities.js";
-import { esc } from "./html.js";
+import { errorText } from "./html.js";
 import { renderDepartures } from "./render/departures.js";
 import { renderTimetable, renderTimetableHeader } from "./render/timetable.js";
-import { message } from "./render/shared.js";
+import { LOADING, message } from "./render/shared.js";
 import {
     ATTR_DAY,
     ATTR_DIRECTION,
@@ -13,10 +13,9 @@ import {
     ID_BACK_BTN,
     ID_SCHEDULE_BTN,
     MAX_DAY_OFFSET,
-    TICK_MS,
 } from "./constants.js";
 
-class NaolibCard extends NaolibBaseCard {
+export class NaolibCard extends NaolibBaseCard {
     // A Naolib sensor is detected by its attributes rather than its
     // entity_id, so the card keeps working even if the entity is renamed.
     static normalizeConfig = normalizeConfig;
@@ -28,6 +27,8 @@ class NaolibCard extends NaolibBaseCard {
     static noEntityMessage =
         "Aucune entité Naolib trouvée. Ajoutez l'intégration via Paramètres &gt; Appareils et services.";
     static logLabel = "Naolib card";
+    // The timetable view ticks too: its clock and countdowns would drift.
+    static ticks = true;
 
     // Timetable view state, kept in memory only: the selected line, the
     // direction remembered for each line and the day being browsed.
@@ -43,29 +44,6 @@ class NaolibCard extends NaolibBaseCard {
 
     static getConfigElement() {
         return document.createElement("naolib-card-editor");
-    }
-
-    connectedCallback() {
-        // Tick the displayed times down between coordinator refreshes, so
-        // the countdown stays accurate (and reaches "proche" on time)
-        // instead of aging until the next poll. The timetable view ticks too:
-        // its clock and countdowns would drift otherwise.
-        if (this._ticker) return;
-        this._ticker = setInterval(() => {
-            if (!this._state || !this.content) return;
-            try {
-                this._render();
-            } catch (err) {
-                console.error("Naolib card: render failed", err);
-            }
-        }, TICK_MS);
-    }
-
-    disconnectedCallback() {
-        if (this._ticker) {
-            clearInterval(this._ticker);
-            this._ticker = null;
-        }
     }
 
     // Replacing innerHTML wholesale loses the scroll position of the timetable
@@ -153,7 +131,7 @@ class NaolibCard extends NaolibBaseCard {
                 console.error("Error fetching Naolib schedules:", err);
                 if (this._showSchedule) {
                     this.content.innerHTML = `${renderTimetableHeader()}${message(
-                        `Erreur de chargement des horaires : ${esc(err?.message || err)}`,
+                        `Erreur de chargement des horaires : ${errorText(err)}`,
                     )}`;
                 }
             })
@@ -230,7 +208,7 @@ class NaolibCard extends NaolibBaseCard {
 
     _render() {
         if (!this._state) {
-            this._message("Chargement...");
+            this._message(LOADING);
             return;
         }
 
@@ -270,5 +248,3 @@ class NaolibCard extends NaolibBaseCard {
         return 2 + Math.ceil(departures.length / (this.config.compact ? 1 : 2));
     }
 }
-
-export { NaolibCard };

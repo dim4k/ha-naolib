@@ -1,7 +1,7 @@
 import { NaolibBaseCard } from "../base-card.js";
-import { TICK_MS } from "../constants.js";
 import { firstLocatable } from "../entities.js";
-import { esc } from "../html.js";
+import { errorText, esc } from "../html.js";
+import { LOADING } from "../render/shared.js";
 import { normalizeAroundConfig, prepareStops } from "./config.js";
 import { noStopsMessage, notLocatedMessage, renderAround } from "./render.js";
 
@@ -16,6 +16,8 @@ export class NaolibAroundCard extends NaolibBaseCard {
     static noEntityMessage =
         "Choisissez une personne, une zone ou un traceur à suivre dans l'éditeur de la carte.";
     static logLabel = "Naolib around card";
+    // Counts the departures down between two pushes from the integration.
+    static ticks = true;
 
     static getConfigElement() {
         return document.createElement("naolib-around-card-editor");
@@ -26,24 +28,18 @@ export class NaolibAroundCard extends NaolibBaseCard {
     }
 
     connectedCallback() {
-        // Count the departures down between two pushes from the integration.
-        if (!this._ticker) {
-            this._ticker = setInterval(() => {
-                if (!this._data || !this.content) return;
-                try {
-                    this._render();
-                } catch (err) {
-                    console.error("Naolib around card: render failed", err);
-                }
-            }, TICK_MS);
-        }
+        super.connectedCallback();
         this._subscribe();
     }
 
     disconnectedCallback() {
-        clearInterval(this._ticker);
-        this._ticker = null;
+        super.disconnectedCallback();
         this._unsubscribe();
+    }
+
+    // The stops come from the subscription, not from an entity state.
+    _hasData() {
+        return Boolean(this._data);
     }
 
     _updateFromHass(hass) {
@@ -59,7 +55,7 @@ export class NaolibAroundCard extends NaolibBaseCard {
         this._name = hass.states[entity]?.attributes?.friendly_name || entity;
         this._updateTitle(this.config.title || `Autour de ${this._name}`);
         this._subscribe();
-        if (!this._data) this._message("Chargement...");
+        if (!this._data) this._message(LOADING);
     }
 
     // One subscription per entity, radius and number of stops; a new
@@ -94,7 +90,7 @@ export class NaolibAroundCard extends NaolibBaseCard {
             console.error("Naolib around card: subscription failed", err);
             if (this.content) {
                 this._message(
-                    `Impossible de suivre ${esc(this._name || entity)} : l'intégration Naolib est-elle installée avec au moins une entrée ? (${esc(err?.message || err?.code || err)})`,
+                    `Impossible de suivre ${esc(this._name || entity)} : l'intégration Naolib est-elle installée avec au moins une entrée ? (${errorText(err)})`,
                 );
             }
         }

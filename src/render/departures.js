@@ -1,21 +1,9 @@
 import { esc } from "../html.js";
 import { directionHeading } from "../directions.js";
 import { lineBadge, modeLabel } from "../lines.js";
-import { message } from "./shared.js";
+import { message, timeClass } from "./shared.js";
 import { formatClock } from "../time.js";
-import {
-    DELAY_TOLERANCE_MINUTES,
-    ID_SCHEDULE_BTN,
-    MS_PER_MINUTE,
-    URGENT_MINUTES,
-    WARNING_MINUTES,
-} from "../constants.js";
-
-function timeClass(minutes) {
-    if (minutes <= URGENT_MINUTES) return "time urgent";
-    if (minutes <= WARNING_MINUTES) return "time warning";
-    return "time";
-}
+import { DELAY_TOLERANCE_MINUTES, ID_SCHEDULE_BTN, MS_PER_MINUTE } from "../constants.js";
 
 // Departure clock, and the theoretical one struck through next to it when the
 // vehicle drifts from the timetable (SIRI Aimed vs Expected). Showing both

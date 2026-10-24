@@ -21,10 +21,14 @@ export function configValidator(cardType) {
             return value;
         },
 
-        // Merge the defaults and check the options every card has.
+        // Merge the defaults and check the options every card has. A `null`
+        // option stands for "not set", like a missing one.
         base(config, defaults) {
             if (config && typeof config !== "object") invalid("configuration invalide");
-            const raw = { ...defaults, ...(config || {}) };
+            const raw = { ...defaults };
+            for (const [key, value] of Object.entries(config || {})) {
+                if (value !== null && value !== undefined) raw[key] = value;
+            }
             if (typeof raw.entity !== "string") invalid('"entity" doit être une entité');
             if (typeof raw.title !== "string") invalid('"title" doit être du texte');
             return raw;

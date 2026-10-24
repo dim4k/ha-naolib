@@ -1,4 +1,4 @@
-import { MS_PER_MINUTE, STALE_SECONDS } from "./constants.js";
+import { MS_PER_MINUTE } from "./constants.js";
 import { humanizeSeconds } from "./time.js";
 import { configValidator } from "./validate.js";
 
@@ -24,21 +24,15 @@ export function normalizeConfig(config) {
     const raw = check.base(config, DEFAULT_CONFIG);
 
     let lines = raw.lines;
-    if (lines === null || lines === undefined) lines = [];
     if (typeof lines === "string" || typeof lines === "number") lines = [lines];
     if (!Array.isArray(lines)) check.invalid('"lines" doit être une liste de lignes');
 
     return {
         ...raw,
         lines: lines.map((line) => String(line)),
-        direction: check.integer(raw.direction ?? 0, "direction", 0, 2),
-        walk_time: check.integer(raw.walk_time ?? 0, "walk_time", 0, MAX_WALK_TIME),
-        max_lines: check.integer(
-            raw.max_lines ?? DEFAULT_CONFIG.max_lines,
-            "max_lines",
-            1,
-            MAX_LINES_LIMIT,
-        ),
+        direction: check.integer(raw.direction, "direction", 0, 2),
+        walk_time: check.integer(raw.walk_time, "walk_time", 0, MAX_WALK_TIME),
+        max_lines: check.integer(raw.max_lines, "max_lines", 1, MAX_LINES_LIMIT),
         show_timetable_button: check.boolean(
             raw.show_timetable_button,
             "show_timetable_button",
@@ -61,7 +55,8 @@ export function matchesFilters(line, direction, config) {
 
 // Recompute the humanized times from the raw timestamps so the card ticks
 // down between coordinator refreshes, and apply the configured filters.
-// Departures more than 60 s in the past are dropped (mirrors the backend).
+// Departures already gone, or gone by the time the stop is reached on foot,
+// are dropped.
 export function prepareDepartures(departures, config, now = Date.now()) {
     const earliest = now + config.walk_time * MS_PER_MINUTE;
     const out = [];
@@ -73,7 +68,6 @@ export function prepareDepartures(departures, config, now = Date.now()) {
         if (Number.isNaN(timestamp)) continue;
         if (timestamp < earliest) continue;
         const delta = (timestamp - now) / 1000;
-        if (delta < -STALE_SECONDS) continue;
 
         out.push({
             ...departure,

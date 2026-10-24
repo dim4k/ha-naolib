@@ -5,6 +5,7 @@ import {
     MAX_STOPS,
     MIN_RADIUS,
 } from "./config.js";
+import { LOCATABLE_DOMAINS } from "../entities.js";
 import { NaolibFormEditor } from "../form-editor.js";
 
 const LABELS = {
@@ -27,7 +28,7 @@ function buildSchema() {
             name: "entity",
             required: true,
             selector: {
-                entity: { filter: [{ domain: ["person", "zone", "device_tracker"] }] },
+                entity: { filter: [{ domain: LOCATABLE_DOMAINS }] },
             },
         },
         { name: "title", selector: { text: {} } },

@@ -1,7 +1,8 @@
 import { NaolibBaseCard } from "../base-card.js";
+import { isBikeEntity } from "../entities.js";
+import { LOADING } from "../render/shared.js";
 import { normalizeBikeConfig, prepareNearby } from "./config.js";
 import { renderBikeStation } from "./render.js";
-import { isBikeEntity } from "../entities.js";
 
 export class NaolibBikeCard extends NaolibBaseCard {
     static normalizeConfig = normalizeBikeConfig;
@@ -37,7 +38,7 @@ export class NaolibBikeCard extends NaolibBaseCard {
 
     _render() {
         if (!this._state) {
-            this._message("Chargement...");
+            this._message(LOADING);
             return;
         }
 

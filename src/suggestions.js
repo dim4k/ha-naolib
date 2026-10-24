@@ -19,13 +19,8 @@ export const departureSuggestion = suggest(
 export const bikeSuggestion = suggest(isBikeEntity, "naolib-bike-card", "Station vélo");
 
 // Any located person, zone or device tracker can feed the "around me" card.
-export function aroundSuggestion(hass, entityId) {
-    return isLocatable(entityId, hass.states[entityId])
-        ? [
-              {
-                  label: "Arrêts à proximité",
-                  config: { type: "custom:naolib-around-card", entity: entityId },
-              },
-          ]
-        : [];
-}
+export const aroundSuggestion = suggest(
+    isLocatable,
+    "naolib-around-card",
+    "Arrêts à proximité",
+);

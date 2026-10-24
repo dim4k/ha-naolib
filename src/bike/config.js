@@ -21,14 +21,9 @@ export function normalizeBikeConfig(config) {
 
     return {
         ...raw,
-        nearby_count: check.integer(
-            raw.nearby_count ?? DEFAULT_BIKE_CONFIG.nearby_count,
-            "nearby_count",
-            0,
-            MAX_NEARBY_COUNT,
-        ),
+        nearby_count: check.integer(raw.nearby_count, "nearby_count", 0, MAX_NEARBY_COUNT),
         nearby_radius: check.integer(
-            raw.nearby_radius ?? DEFAULT_BIKE_CONFIG.nearby_radius,
+            raw.nearby_radius,
             "nearby_radius",
             0,
             MAX_NEARBY_RADIUS,

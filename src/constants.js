@@ -25,8 +25,5 @@ export const WARNING_MINUTES = 3;
 // Minimum delay/advance vs the theoretical timetable worth showing.
 export const DELAY_TOLERANCE_MINUTES = 2;
 
-// Departures older than this are dropped (mirrors the backend).
-export const STALE_SECONDS = 60;
-
 // Hours below this belong to the tail of the previous service day.
 export const SERVICE_DAY_CUTOFF_HOUR = 4;

@@ -14,3 +14,8 @@ export function esc(value) {
             })[c],
     );
 }
+
+// What an error says about itself, ready to interpolate.
+export function errorText(err) {
+    return esc(err?.message || err?.code || err);
+}
