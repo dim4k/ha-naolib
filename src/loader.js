@@ -4,7 +4,10 @@
 // waits for the element registry to be final before defining anything.
 
 const CARD_URL = new URL(import.meta.url);
-CARD_URL.pathname = CARD_URL.pathname.replace(/[^/]*$/, "naolib-card.js");
+// The integration serves this module uncached and stamps the card's content
+// hash below, so a new card is a new URL even when an old page is cached.
+CARD_URL.pathname = "/naolib_static/naolib-card.js";
+CARD_URL.search = "?v=__NAOLIB_CARD_HASH__";
 
 const IMPORT_TIMEOUT_MS = 10000;
 const APP_TIMEOUT_MS = 20000;
