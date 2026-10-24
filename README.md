@@ -65,7 +65,7 @@ removed by hand.
 
 ## Dashboard cards
 
-Both cards are registered by the integration, so they show up in the card picker, and every
+The cards are registered by the integration, so they show up in the card picker, and every
 option below is also available from their visual editor.
 
 When adding a card **by entity** (Home Assistant 2026.9 or newer), picking a Naolib stop or bike
@@ -92,6 +92,29 @@ tile per hour, scrolled to the current one. That view is theoretical only.
 | `max_lines`             | `6`     | Maximum rows per direction (per card when compact)        |
 | `show_timetable_button` | `true`  | Show the full timetable button                            |
 | `compact`               | `false` | One line per departure, without direction grouping        |
+
+### Around me — `custom:naolib-around-card`
+
+```yaml
+type: custom:naolib-around-card
+entity: device_tracker.phone
+radius: 500
+```
+
+Lists the stops around a person, zone or device tracker, nearest first, with their next
+departures. The integration follows the entity live: as it moves, stops appear and disappear.
+Nothing is created (no entity, no device): the stops are watched only while the card is
+displayed, and still read from the shared network request. The integration only has to be set
+up with at least one entry.
+
+| Option       | Default | Description                                         |
+| ------------ | ------- | --------------------------------------------------- |
+| `entity`     | —       | Person, zone or device tracker with GPS coordinates |
+| `title`      | —       | Override the card title ("Autour de …" by default)  |
+| `radius`     | `500`   | Search radius in meters (100–3000)                  |
+| `max_stops`  | `5`     | Maximum number of stops (1–15)                      |
+| `departures` | `3`     | Departures shown per line and terminus (1–10)       |
+| `compact`    | `false` | Tighter layout                                      |
 
 ### Bike station — `custom:naolib-bike-card`
 

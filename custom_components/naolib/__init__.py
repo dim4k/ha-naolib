@@ -40,11 +40,17 @@ from .const import (
     CONF_STOP_CODE,
     CONF_STOP_LABEL,
     CONF_UPDATE_INTERVAL,
+    DEFAULT_AROUND_MAX_STOPS,
+    DEFAULT_AROUND_RADIUS,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     ENTRY_TYPE_BIKE,
     LOADER_FILENAME,
+    MAX_AROUND_MAX_STOPS,
+    MAX_AROUND_RADIUS,
     MAX_TIMETABLE_DAY_OFFSET,
+    MIN_AROUND_MAX_STOPS,
+    MIN_AROUND_RADIUS,
     PLATFORMS,
     SERVICE_GET_DEPARTURES,
 )
@@ -55,6 +61,7 @@ from .coordinator import (
     build_stop_data,
     filter_departures,
 )
+from .live import NaolibLiveAround
 from .schedules import build_timetable, calendar_end
 
 _LOGGER = logging.getLogger(__name__)
@@ -96,6 +103,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         NaolibGlobalCoordinator(hass), NaolibBikeCoordinator(hass)
     )
     websocket_api.async_register_command(hass, handle_get_data)
+    websocket_api.async_register_command(hass, handle_around_subscribe)
     hass.services.async_register(
         DOMAIN,
         SERVICE_GET_DEPARTURES,
@@ -324,6 +332,43 @@ def _schedule_refresh(
 async def _async_update_listener(hass: HomeAssistant, entry: NaolibConfigEntry) -> None:
     """Reload the entry when options are updated."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "naolib/around/subscribe",
+        vol.Required("entity_id"): cv.entity_id,
+        vol.Optional("radius", default=DEFAULT_AROUND_RADIUS): vol.All(
+            vol.Coerce(int), vol.Range(min=MIN_AROUND_RADIUS, max=MAX_AROUND_RADIUS)
+        ),
+        vol.Optional("max_stops", default=DEFAULT_AROUND_MAX_STOPS): vol.All(
+            vol.Coerce(int),
+            vol.Range(min=MIN_AROUND_MAX_STOPS, max=MAX_AROUND_MAX_STOPS),
+        ),
+    }
+)
+@websocket_api.async_response
+async def handle_around_subscribe(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Stream the stops around an entity, and their departures, to a card.
+
+    The stops follow the entity as it moves; they are registered on the
+    shared coordinator only while the subscription lives.
+    """
+    msg_id = msg["id"]
+    live = NaolibLiveAround(
+        hass,
+        hass.data[DOMAIN].coordinator,
+        f"live:{id(connection)}:{msg_id}",
+        lambda data: connection.send_message(websocket_api.event_message(msg_id, data)),
+        entity_id=msg["entity_id"],
+        radius=msg["radius"],
+        max_stops=msg["max_stops"],
+    )
+    connection.subscriptions[msg_id] = live.stop
+    connection.send_result(msg_id)
+    await live.async_start()
 
 
 @websocket_api.websocket_command(

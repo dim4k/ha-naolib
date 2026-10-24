@@ -1,4 +1,4 @@
-import { isBikeEntity, isDepartureEntity } from "./entities.js";
+import { isBikeEntity, isDepartureEntity, isLocatable } from "./entities.js";
 
 // Home Assistant's card picker can browse by entity: community cards that
 // implement `getEntitySuggestion` are then offered for the picked entity, in
@@ -17,3 +17,15 @@ export const departureSuggestion = suggest(
 );
 
 export const bikeSuggestion = suggest(isBikeEntity, "naolib-bike-card", "Station vélo");
+
+// Any located person, zone or device tracker can feed the "around me" card.
+export function aroundSuggestion(hass, entityId) {
+    return isLocatable(entityId, hass.states[entityId])
+        ? [
+              {
+                  label: "Arrêts à proximité",
+                  config: { type: "custom:naolib-around-card", entity: entityId },
+              },
+          ]
+        : [];
+}
