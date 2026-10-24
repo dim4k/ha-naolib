@@ -94,6 +94,14 @@
             }
         }
     },
+    "device": {
+        "stop": {
+            "name": "Stop {name}"
+        },
+        "bike_station": {
+            "name": "Bike station {name}"
+        }
+    },
     "entity": {
         "sensor": {
             "next_departures": {

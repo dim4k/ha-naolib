@@ -89,6 +89,10 @@ async def test_setup_and_unload(hass: HomeAssistant) -> None:
     stop = coordinator.tracked[entry.entry_id]
     assert stop.code == "STOP1"
     assert stop.quays == ["QUAY1"]
+    # Named in the language of the server (English in the tests).
+    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, "STOP1")})
+    assert device is not None
+    assert device.name == "Stop Label STOP1"
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
@@ -381,6 +385,9 @@ async def test_bike_setup_and_unload(hass: HomeAssistant) -> None:
     assert entry.state is ConfigEntryState.LOADED
     coordinator = hass.data[DOMAIN].bikes
     assert coordinator.tracked[entry.entry_id].id == "1"
+    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, "bike_1")})
+    assert device is not None
+    assert device.name == "Bike station Station 1"
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()

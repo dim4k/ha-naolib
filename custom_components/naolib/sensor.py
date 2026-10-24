@@ -75,7 +75,8 @@ class NaolibNextDeparturesSensor(
         self._attr_unique_id = f"naolib_{stop.code}_next"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, stop.code)},
-            name=f"Arrêt {stop.name}",
+            translation_key="stop",
+            translation_placeholders={"name": stop.name},
             manufacturer="Naolib",
             model="Arrêt",
         )
@@ -121,7 +122,8 @@ class NaolibBikeStationSensor(CoordinatorEntity[NaolibBikeCoordinator], SensorEn
         self._station = station
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{BIKE_ID_PREFIX}{station.id}")},
-            name=f"Station vélo {station.name}",
+            translation_key="bike_station",
+            translation_placeholders={"name": station.name},
             manufacturer="Naolib",
             model="Station vélo",
         )
