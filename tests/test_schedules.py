@@ -146,11 +146,13 @@ def test_build_timetable_groups_departures_by_hour() -> None:
     with _timetable("S1"):
         timetable = schedules.build_timetable("STATION", date(2024, 1, 3))
 
-    assert timetable["C3|1"]["horaires"] == {"07": ["30", "45"]}
-    assert timetable["C3|1"]["direction_label"] == "Hôtel Dieu"
-    assert timetable["C3|1"]["ligne"] == {"numLigne": "C3", "direction": "Hôtel Dieu"}
-    # No destination in the feed: fall back to the direction number.
-    assert timetable["2|2"]["direction_label"] == "Sens 2"
+    assert timetable["C3|1"] == {
+        "line": "C3",
+        "destination": "Hôtel Dieu",
+        "times": {"07": ["30", "45"]},
+    }
+    # No destination in the feed: the card names the direction by its number.
+    assert timetable["2|2"]["destination"] == ""
 
 
 def test_groups_without_service_today_are_skipped() -> None:
@@ -166,6 +168,6 @@ def test_build_timetable_groups_by_line_and_direction() -> None:
 
     for key, group in timetable.items():
         line, direction = key.split("|")
-        assert group["ligne"]["numLigne"] == line
+        assert group["line"] == line
         assert direction in {"1", "2"}
-        assert group["horaires"]
+        assert group["times"]

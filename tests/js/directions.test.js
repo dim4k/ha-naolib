@@ -6,10 +6,10 @@ import {
 } from "../../src/directions.js";
 
 const schedules = {
-    "C1|1": { ligne: { numLigne: "C1", direction: "François Mitterrand" } },
-    "C1|2": { ligne: { numLigne: "C1", direction: "Gare de Chantenay" } },
-    "2|1": { ligne: { numLigne: "2", direction: "Orvault Grand Val" } },
-    "2|2": { ligne: { numLigne: "2", direction: "Trocardière" } },
+    "C1|1": { line: "C1", destination: "François Mitterrand" },
+    "C1|2": { line: "C1", destination: "Gare de Chantenay" },
+    "2|1": { line: "2", destination: "Orvault Grand Val" },
+    "2|2": { line: "2", destination: "Trocardière" },
 };
 
 describe("directionTermini", () => {

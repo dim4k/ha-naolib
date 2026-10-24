@@ -10,19 +10,19 @@ const NOW = new Date(2026, 7, 4, 14, 0).getTime();
 
 const SCHEDULES = {
     "C1|1": {
-        ligne: { numLigne: "C1", direction: "Beaujoire" },
-        direction_label: "Beaujoire",
-        horaires: { 14: ["05", "35"], 15: ["05"], 13: ["05"] },
+        line: "C1",
+        destination: "Beaujoire",
+        times: { 14: ["05", "35"], 15: ["05"], 13: ["05"] },
     },
     "C1|2": {
-        ligne: { numLigne: "C1", direction: "François Mitterrand" },
-        direction_label: "François Mitterrand",
-        horaires: { 14: ["10"] },
+        line: "C1",
+        destination: "François Mitterrand",
+        times: { 14: ["10"] },
     },
     "2|1": {
-        ligne: { numLigne: "2", direction: "Orvault" },
-        direction_label: "Orvault",
-        horaires: { 14: ["20"] },
+        line: "2",
+        destination: "Orvault",
+        times: { 14: ["20"] },
     },
 };
 
@@ -45,7 +45,7 @@ describe("groupSchedules", () => {
 
     it("falls back to a generic label when the destination is missing", () => {
         const groups = groupSchedules(
-            { "5|1": { direction_label: "", horaires: {} } },
+            { "5|1": { destination: "", times: {} } },
             OPEN,
         );
         expect(groups[0].directions[0].label).toBe("Sens 1");
@@ -166,7 +166,7 @@ describe("renderTimetable", () => {
 
     it("reports a direction without any slot", () => {
         const html = render({
-            schedules: { "9|1": { direction_label: "Nulle part", horaires: {} } },
+            schedules: { "9|1": { destination: "Nulle part", times: {} } },
         });
         expect(html).toContain("Aucun horaire aujourd'hui");
     });
@@ -174,7 +174,7 @@ describe("renderTimetable", () => {
     it("escapes the destination labels", () => {
         const html = render({
             schedules: {
-                "9|1": { direction_label: "<script>", horaires: {} },
+                "9|1": { destination: "<script>", times: {} },
             },
         });
         expect(html).not.toContain("<script>");

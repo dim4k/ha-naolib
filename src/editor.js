@@ -153,9 +153,9 @@ export class NaolibCardEditor extends NaolibFormEditor {
         if (!stopCode || timetablesByStop.has(stopCode)) return;
         timetablesByStop.set(stopCode, undefined);
         this._hass
-            .callWS({ type: "naolib/get_data", stop_code: stopCode })
+            .callWS({ type: "naolib/timetable", stop_code: stopCode })
             .then((data) => {
-                timetablesByStop.set(stopCode, data?.schedules || {});
+                timetablesByStop.set(stopCode, data?.timetable || {});
                 super._render();
             })
             .catch(() => {

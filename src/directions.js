@@ -22,7 +22,7 @@ export function directionTermini(schedules, departures, lines = []) {
 
     for (const [key, group] of Object.entries(schedules || {})) {
         const [line, direction] = key.split("|");
-        add(group?.ligne?.numLigne || line, direction, group?.ligne?.direction);
+        add(group?.line || line, direction, group?.destination);
     }
     for (const departure of departures || []) {
         add(departure.line, departure.direction, departure.destination);

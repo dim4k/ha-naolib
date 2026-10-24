@@ -184,27 +184,28 @@ def last_departures(station_id: str, today: date) -> dict[str, str]:
 def build_timetable(station_id: str, today: date) -> dict[str, dict[str, Any]]:
     """Build the full timetable of a station for the given date.
 
-    The returned shape matches what the Lovelace card expects::
+    The returned shape is what the Lovelace card reads, keyed like the
+    groups (``"{line}|{direction}"``)::
 
-        {group_key: {"ligne": {"numLigne": line, "direction": destination},
-                     "direction_label": destination,
-                     "horaires": {"HH": ["MM", ...]}}}
+        {group_key: {"line": line, "destination": destination,
+                     "times": {"HH": ["MM", ...]}}}
+
+    The destination is empty when the feed names none.
     """
-    schedules: dict[str, dict[str, Any]] = {}
+    timetable: dict[str, dict[str, Any]] = {}
 
     for group_key, group, times in _active_times(station_id, today):
-        horaires: dict[str, list[str]] = {}
+        by_hour: dict[str, list[str]] = {}
         # Several services can run the same departure; show it once.
         for value in set(times):
-            horaires.setdefault(value[:2], []).append(value[2:])
-        for minutes in horaires.values():
+            by_hour.setdefault(value[:2], []).append(value[2:])
+        for minutes in by_hour.values():
             minutes.sort()
 
-        destination = group.get("destination") or ""
-        schedules[group_key] = {
-            "ligne": {"numLigne": group.get("line", ""), "direction": destination},
-            "direction_label": destination or f"Sens {group.get('direction', 1)}",
-            "horaires": horaires,
+        timetable[group_key] = {
+            "line": group.get("line", ""),
+            "destination": group.get("destination") or "",
+            "times": by_hour,
         }
 
-    return schedules
+    return timetable

@@ -117,7 +117,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     hass.data[DOMAIN] = NaolibData(
         NaolibDeparturesCoordinator(hass), NaolibBikeCoordinator(hass)
     )
-    websocket_api.async_register_command(hass, handle_get_data)
+    websocket_api.async_register_command(hass, handle_timetable)
     websocket_api.async_register_command(hass, handle_around_subscribe)
     hass.services.async_register(
         DOMAIN,
@@ -383,7 +383,7 @@ async def handle_around_subscribe(
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "naolib/get_data",
+        vol.Required("type"): "naolib/timetable",
         vol.Required("stop_code"): str,
         vol.Optional("day_offset", default=0): vol.All(
             vol.Coerce(int), vol.Range(min=0, max=MAX_TIMETABLE_DAY_OFFSET)
@@ -391,7 +391,7 @@ async def handle_around_subscribe(
     }
 )
 @websocket_api.async_response
-async def handle_get_data(
+async def handle_timetable(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """Return the full timetable of a configured stop for one day.
@@ -407,15 +407,15 @@ async def handle_get_data(
         return
 
     day = dt_util.now().date() + timedelta(days=msg["day_offset"])
-    schedules, end = await hass.async_add_executor_job(_timetable, stop_code, day)
+    timetable, end = await hass.async_add_executor_job(_timetable, stop_code, day)
     connection.send_result(
         msg["id"],
         {
-            "schedules": schedules,
-            "schedules_date": day.isoformat(),
+            "timetable": timetable,
+            "date": day.isoformat(),
             # The timetables ship with the integration: once the calendar runs
             # out, every day is empty and only an update brings them back.
-            "schedules_expired": end is not None and day > end,
+            "expired": end is not None and day > end,
         },
     )
 

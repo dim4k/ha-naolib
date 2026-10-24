@@ -958,7 +958,7 @@ function directionTermini(schedules, departures2, lines = []) {
   };
   for (const [key, group] of Object.entries(schedules || {})) {
     const [line, direction] = key.split("|");
-    add(group?.ligne?.numLigne || line, direction, group?.ligne?.direction);
+    add(group?.line || line, direction, group?.destination);
   }
   for (const departure of departures2 || []) {
     add(departure.line, departure.direction, departure.destination);
@@ -1110,8 +1110,8 @@ function groupSchedules(schedules, config) {
       key,
       line,
       direction: Number(direction),
-      label: data.direction_label || `Sens ${direction}`,
-      horaires: data.horaires || {}
+      label: data.destination || `Sens ${direction}`,
+      times: data.times || {}
     });
   }
   return [...byLine2.values()].sort(
@@ -1128,12 +1128,12 @@ function resolveSelection(groups, selectedLine, directionByLine) {
   const entry = group.directions.find((item) => item.direction === wanted) || group.directions[0];
   return { group, entry };
 }
-function theoreticalTimestamps(horaires, now) {
+function theoreticalTimestamps(times, now) {
   const out = [];
-  for (const hour of Object.keys(horaires || {})) {
+  for (const hour of Object.keys(times || {})) {
     const hourValue = parseInt(hour, 10);
     if (Number.isNaN(hourValue)) continue;
-    for (const minute of horaires[hour] || []) {
+    for (const minute of times[hour] || []) {
       const minuteValue = parseInt(minute, 10);
       if (Number.isNaN(minuteValue)) continue;
       out.push(passageDate(now, hourValue, minuteValue).getTime());
@@ -1141,18 +1141,18 @@ function theoreticalTimestamps(horaires, now) {
   }
   return out.sort((a, b) => a - b);
 }
-function nextTimestamp(horaires, now) {
-  return theoreticalTimestamps(horaires, now).find(
+function nextTimestamp(times, now) {
+  return theoreticalTimestamps(times, now).find(
     (timestamp) => timestamp >= now
   );
 }
-function firstSlot(horaires) {
-  const hours = Object.keys(horaires || {}).sort(
+function firstSlot(times) {
+  const hours = Object.keys(times || {}).sort(
     (a, b) => serviceHourKey(a) - serviceHourKey(b)
   );
   const hour = hours[0];
   if (hour === void 0) return "";
-  const minutes = [...horaires[hour] || []].sort();
+  const minutes = [...times[hour] || []].sort();
   if (!minutes.length) return "";
   return `${String(hour).padStart(2, "0")}:${minutes[0]}`;
 }
@@ -1191,7 +1191,7 @@ function renderDirection(group, entry) {
         </div>
     `;
 }
-function renderNext(horaires, now, next, live) {
+function renderNext(times, now, next, live) {
   if (live) {
     if (next === void 0) return "";
     const relative = humanizeSeconds((next - now) / 1e3);
@@ -1205,7 +1205,7 @@ function renderNext(horaires, now, next, live) {
             </div>
         `;
   }
-  const first = firstSlot(horaires);
+  const first = firstSlot(times);
   if (!first) return "";
   return `
         <div class="tt-section tt-next-section">
@@ -1234,8 +1234,8 @@ function renderDays(dayOffset, now) {
         </div>
     `;
 }
-function renderHours(horaires, now, next, live) {
-  const hours = Object.keys(horaires || {}).sort(
+function renderHours(times, now, next, live) {
+  const hours = Object.keys(times || {}).sort(
     (a, b) => serviceHourKey(a) - serviceHourKey(b)
   );
   if (!hours.length) return message(emptyMessage(live));
@@ -1243,7 +1243,7 @@ function renderHours(horaires, now, next, live) {
   const cells = hours.map((hour) => {
     const key = serviceHourKey(hour);
     const state = currentHourKey === null ? "" : key === currentHourKey ? "now" : key < currentHourKey ? "past" : "";
-    const minutes = (horaires[hour] || []).map((minute) => {
+    const minutes = (times[hour] || []).map((minute) => {
       const timestamp = passageDate(
         now,
         parseInt(hour, 10),
@@ -1286,13 +1286,13 @@ function renderTimetable({
     ].join("");
   }
   const { group, entry } = resolveSelection(groups, selectedLine, directionByLine);
-  const next = live ? nextTimestamp(entry.horaires, now) : void 0;
+  const next = live ? nextTimestamp(entry.times, now) : void 0;
   return [
     renderTimetableHeader(renderChips(groups, group.line)),
     renderDirection(group, entry),
-    renderNext(entry.horaires, now, next, live),
+    renderNext(entry.times, now, next, live),
     renderDays(dayOffset, now),
-    renderHours(entry.horaires, now, next, live)
+    renderHours(entry.times, now, next, live)
   ].join("");
 }
 
@@ -1368,12 +1368,12 @@ var NaolibCard = class extends NaolibBaseCard {
     if (!stopCode) return;
     this._fetchingDays.add(dayOffset);
     this._hass.callWS({
-      type: "naolib/get_data",
+      type: "naolib/timetable",
       stop_code: stopCode,
       day_offset: dayOffset
     }).then((data) => {
-      this._schedulesByDay.set(dayOffset, data?.schedules || {});
-      if (data?.schedules_expired) this._expiredDays.add(dayOffset);
+      this._schedulesByDay.set(dayOffset, data?.timetable || {});
+      if (data?.expired) this._expiredDays.add(dayOffset);
       this._fetchedDays.add(dayOffset);
       if (this._showSchedule) this._render();
     }).catch((err) => {
@@ -1857,8 +1857,8 @@ var NaolibCardEditor = class extends NaolibFormEditor {
     const stopCode = this._hass?.states[this._config?.entity]?.attributes?.stop_code;
     if (!stopCode || timetablesByStop.has(stopCode)) return;
     timetablesByStop.set(stopCode, void 0);
-    this._hass.callWS({ type: "naolib/get_data", stop_code: stopCode }).then((data) => {
-      timetablesByStop.set(stopCode, data?.schedules || {});
+    this._hass.callWS({ type: "naolib/timetable", stop_code: stopCode }).then((data) => {
+      timetablesByStop.set(stopCode, data?.timetable || {});
       super._render();
     }).catch(() => {
     });

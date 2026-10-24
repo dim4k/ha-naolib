@@ -117,13 +117,13 @@ export class NaolibCard extends NaolibBaseCard {
         this._fetchingDays.add(dayOffset);
         this._hass
             .callWS({
-                type: "naolib/get_data",
+                type: "naolib/timetable",
                 stop_code: stopCode,
                 day_offset: dayOffset,
             })
             .then((data) => {
-                this._schedulesByDay.set(dayOffset, data?.schedules || {});
-                if (data?.schedules_expired) this._expiredDays.add(dayOffset);
+                this._schedulesByDay.set(dayOffset, data?.timetable || {});
+                if (data?.expired) this._expiredDays.add(dayOffset);
                 this._fetchedDays.add(dayOffset);
                 if (this._showSchedule) this._render();
             })

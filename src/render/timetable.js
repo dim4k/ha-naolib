@@ -35,7 +35,7 @@ export function renderTimetableHeader(extra = "") {
 
 // Turn the raw "{line}|{direction}" payload into one entry per line, each
 // holding its directions. Both the line and the direction id are read from the
-// key: the payload itself only carries the destination label.
+// key, the only place the direction id is carried.
 export function groupSchedules(schedules, config) {
     const byLine = new Map();
 
@@ -50,8 +50,8 @@ export function groupSchedules(schedules, config) {
             key,
             line,
             direction: Number(direction),
-            label: data.direction_label || `Sens ${direction}`,
-            horaires: data.horaires || {},
+            label: data.destination || `Sens ${direction}`,
+            times: data.times || {},
         });
     }
 
@@ -78,12 +78,12 @@ export function resolveSelection(groups, selectedLine, directionByLine) {
     return { group, entry };
 }
 
-function theoreticalTimestamps(horaires, now) {
+function theoreticalTimestamps(times, now) {
     const out = [];
-    for (const hour of Object.keys(horaires || {})) {
+    for (const hour of Object.keys(times || {})) {
         const hourValue = parseInt(hour, 10);
         if (Number.isNaN(hourValue)) continue;
-        for (const minute of horaires[hour] || []) {
+        for (const minute of times[hour] || []) {
             const minuteValue = parseInt(minute, 10);
             if (Number.isNaN(minuteValue)) continue;
             out.push(passageDate(now, hourValue, minuteValue).getTime());
@@ -92,21 +92,21 @@ function theoreticalTimestamps(horaires, now) {
     return out.sort((a, b) => a - b);
 }
 
-function nextTimestamp(horaires, now) {
-    return theoreticalTimestamps(horaires, now).find(
+function nextTimestamp(times, now) {
+    return theoreticalTimestamps(times, now).find(
         (timestamp) => timestamp >= now,
     );
 }
 
 // First "HH:MM" of the service day, which starts mid-morning-after for the
 // slots past midnight.
-function firstSlot(horaires) {
-    const hours = Object.keys(horaires || {}).sort(
+function firstSlot(times) {
+    const hours = Object.keys(times || {}).sort(
         (a, b) => serviceHourKey(a) - serviceHourKey(b),
     );
     const hour = hours[0];
     if (hour === undefined) return "";
-    const minutes = [...(horaires[hour] || [])].sort();
+    const minutes = [...(times[hour] || [])].sort();
     if (!minutes.length) return "";
     return `${String(hour).padStart(2, "0")}:${minutes[0]}`;
 }
@@ -163,7 +163,7 @@ function renderDirection(group, entry) {
 
 // On another day there is no "next" passage to count down to, so the banner
 // announces the first departure of the service day instead.
-function renderNext(horaires, now, next, live) {
+function renderNext(times, now, next, live) {
     if (live) {
         if (next === undefined) return "";
         const relative = humanizeSeconds((next - now) / 1000);
@@ -178,7 +178,7 @@ function renderNext(horaires, now, next, live) {
         `;
     }
 
-    const first = firstSlot(horaires);
+    const first = firstSlot(times);
     if (!first) return "";
     return `
         <div class="tt-section tt-next-section">
@@ -214,8 +214,8 @@ function renderDays(dayOffset, now) {
 // Minutes already gone stay visible but dimmed: they give the frequency of the
 // line at a glance, which is what the whole view is for. Nothing is dimmed on
 // another day, where "already gone" means nothing.
-function renderHours(horaires, now, next, live) {
-    const hours = Object.keys(horaires || {}).sort(
+function renderHours(times, now, next, live) {
+    const hours = Object.keys(times || {}).sort(
         (a, b) => serviceHourKey(a) - serviceHourKey(b),
     );
     if (!hours.length) return message(emptyMessage(live));
@@ -237,7 +237,7 @@ function renderHours(horaires, now, next, live) {
                       : key < currentHourKey
                         ? "past"
                         : "";
-            const minutes = (horaires[hour] || [])
+            const minutes = (times[hour] || [])
                 .map((minute) => {
                     const timestamp = passageDate(
                         now,
@@ -297,13 +297,13 @@ export function renderTimetable({
     }
 
     const { group, entry } = resolveSelection(groups, selectedLine, directionByLine);
-    const next = live ? nextTimestamp(entry.horaires, now) : undefined;
+    const next = live ? nextTimestamp(entry.times, now) : undefined;
 
     return [
         renderTimetableHeader(renderChips(groups, group.line)),
         renderDirection(group, entry),
-        renderNext(entry.horaires, now, next, live),
+        renderNext(entry.times, now, next, live),
         renderDays(dayOffset, now),
-        renderHours(entry.horaires, now, next, live),
+        renderHours(entry.times, now, next, live),
     ].join("");
 }

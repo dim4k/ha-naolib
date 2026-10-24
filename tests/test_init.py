@@ -222,12 +222,12 @@ async def test_websocket_returns_the_timetable(
 
     with patch("custom_components.naolib.build_timetable", return_value={"C3|1": {}}):
         await client.send_json_auto_id(
-            {"type": "naolib/get_data", "stop_code": "STOP1"}
+            {"type": "naolib/timetable", "stop_code": "STOP1"}
         )
         response = await client.receive_json()
 
     assert response["success"]
-    assert response["result"]["schedules"] == {"C3|1": {}}
+    assert response["result"]["timetable"] == {"C3|1": {}}
     # The card reads the departures from the sensor, not from here.
     assert "next_departures" not in response["result"]
 
@@ -243,13 +243,13 @@ async def test_websocket_serves_the_timetable_of_a_following_day(
         "custom_components.naolib.build_timetable", return_value={}
     ) as build_timetable:
         await client.send_json_auto_id(
-            {"type": "naolib/get_data", "stop_code": "STOP1", "day_offset": 2}
+            {"type": "naolib/timetable", "stop_code": "STOP1", "day_offset": 2}
         )
         response = await client.receive_json()
 
     expected = dt_util.now().date() + timedelta(days=2)
     assert response["success"]
-    assert response["result"]["schedules_date"] == expected.isoformat()
+    assert response["result"]["date"] == expected.isoformat()
     assert build_timetable.call_args.args[1] == expected
 
 
@@ -266,12 +266,12 @@ async def test_websocket_flags_days_past_the_embedded_calendar(
         patch("custom_components.naolib.calendar_end", return_value=yesterday),
     ):
         await client.send_json_auto_id(
-            {"type": "naolib/get_data", "stop_code": "STOP1"}
+            {"type": "naolib/timetable", "stop_code": "STOP1"}
         )
         response = await client.receive_json()
 
     assert response["success"]
-    assert response["result"]["schedules_expired"] is True
+    assert response["result"]["expired"] is True
 
 
 async def test_websocket_rejects_a_day_offset_out_of_range(
@@ -282,7 +282,7 @@ async def test_websocket_rejects_a_day_offset_out_of_range(
     client = await hass_ws_client(hass)
 
     await client.send_json_auto_id(
-        {"type": "naolib/get_data", "stop_code": "STOP1", "day_offset": 30}
+        {"type": "naolib/timetable", "stop_code": "STOP1", "day_offset": 30}
     )
     response = await client.receive_json()
 
@@ -296,7 +296,7 @@ async def test_websocket_rejects_an_unknown_stop(
     await _setup(hass, _entry())
     client = await hass_ws_client(hass)
 
-    await client.send_json_auto_id({"type": "naolib/get_data", "stop_code": "NOPE"})
+    await client.send_json_auto_id({"type": "naolib/timetable", "stop_code": "NOPE"})
     response = await client.receive_json()
 
     assert not response["success"]
