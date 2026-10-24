@@ -1,5 +1,6 @@
 """The Naolib integration for Home Assistant."""
 
+from dataclasses import dataclass
 from datetime import date, timedelta
 import logging
 from typing import Any
@@ -32,6 +33,7 @@ from .const import (
     ATTR_LIMIT,
     ATTR_LINES,
     ATTR_WALK_TIME,
+    BIKE_ID_PREFIX,
     CARD_URL_PATH,
     CONF_ENTRY_TYPE,
     CONF_QUAYS,
@@ -48,15 +50,16 @@ from .const import (
     LOADER_FILENAME,
     MAX_AROUND_MAX_STOPS,
     MAX_AROUND_RADIUS,
+    MAX_DEPARTURES_LIMIT,
     MAX_TIMETABLE_DAY_OFFSET,
+    MAX_WALK_TIME,
     MIN_AROUND_MAX_STOPS,
     MIN_AROUND_RADIUS,
     PLATFORMS,
     SERVICE_GET_DEPARTURES,
 )
 from .coordinator import (
-    NaolibData,
-    NaolibGlobalCoordinator,
+    NaolibDeparturesCoordinator,
     NaolibStop,
     build_stop_data,
     filter_departures,
@@ -74,15 +77,27 @@ GET_DEPARTURES_SCHEMA = vol.Schema(
         vol.Optional(ATTR_LINES): vol.All(cv.ensure_list, [cv.string]),
         vol.Optional(ATTR_DIRECTION): vol.All(vol.Coerce(int), vol.In([1, 2])),
         vol.Optional(ATTR_WALK_TIME): vol.All(
-            vol.Coerce(int), vol.Range(min=0, max=60)
+            vol.Coerce(int), vol.Range(min=0, max=MAX_WALK_TIME)
         ),
-        vol.Optional(ATTR_LIMIT): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
+        vol.Optional(ATTR_LIMIT): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=MAX_DEPARTURES_LIMIT)
+        ),
     }
 )
 
-# Type alias for an entry carrying its coordinator as runtime data. Which one
-# depends on what the entry tracks: a stop or a bike station.
-type NaolibConfigEntry = ConfigEntry[NaolibGlobalCoordinator | NaolibBikeCoordinator]
+# Which coordinator serves an entry depends on what it tracks: a stop or a
+# bike station. The entry carries it as runtime data.
+type NaolibCoordinator = NaolibDeparturesCoordinator | NaolibBikeCoordinator
+type NaolibConfigEntry = ConfigEntry[NaolibCoordinator]
+
+
+@dataclass
+class NaolibData:
+    """State shared by every config entry, stored in ``hass.data``."""
+
+    departures: NaolibDeparturesCoordinator
+    bikes: NaolibBikeCoordinator
+    loader_url: str = ""
 
 
 def _is_bike(entry: ConfigEntry) -> bool:
@@ -100,7 +115,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     nothing here depends on the entry load/unload cycle.
     """
     hass.data[DOMAIN] = NaolibData(
-        NaolibGlobalCoordinator(hass), NaolibBikeCoordinator(hass)
+        NaolibDeparturesCoordinator(hass), NaolibBikeCoordinator(hass)
     )
     websocket_api.async_register_command(hass, handle_get_data)
     websocket_api.async_register_command(hass, handle_around_subscribe)
@@ -132,26 +147,25 @@ async def _async_get_departures(call: ServiceCall) -> ServiceResponse:
             translation_key="entry_not_loaded",
             translation_placeholders={"target": entry.title},
         )
-    if _is_bike(entry):
+    coordinator = entry.runtime_data
+    if not isinstance(coordinator, NaolibDeparturesCoordinator):
         raise ServiceValidationError(
             translation_domain=DOMAIN,
             translation_key="entry_wrong_type",
             translation_placeholders={"target": entry.title},
         )
 
-    stop = entry.runtime_data.stops[entry.entry_id]
-    payload = build_stop_data(entry.runtime_data.data or {}, stop)
-    return {
-        "stop_code": stop.code,
-        "stop_label": stop.name,
-        "departures": filter_departures(
-            payload["next_departures"],
-            lines=call.data.get(ATTR_LINES),
-            direction=call.data.get(ATTR_DIRECTION),
-            walk_minutes=call.data.get(ATTR_WALK_TIME, 0),
-            limit=call.data.get(ATTR_LIMIT),
-        ),
-    }
+    stop = coordinator.tracked[entry.entry_id]
+    payload = build_stop_data(coordinator.data or {}, stop)
+    # Typed loosely: a response holds JSON values, and lists are invariant.
+    departures: list[Any] = filter_departures(
+        payload["next_departures"],
+        lines=call.data.get(ATTR_LINES),
+        direction=call.data.get(ATTR_DIRECTION),
+        walk_minutes=call.data.get(ATTR_WALK_TIME, 0),
+        limit=call.data.get(ATTR_LIMIT),
+    )
+    return {"stop_code": stop.code, "stop_label": stop.name, "departures": departures}
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:
@@ -198,11 +212,21 @@ async def async_frontend_diagnostics(hass: HomeAssistant) -> dict[str, Any]:
 
 async def async_setup_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bool:
     """Set up the integration from a config entry."""
+    data: NaolibData = hass.data[DOMAIN]
+    interval = int(entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
+    coordinator: NaolibCoordinator
     if _is_bike(entry):
-        if not await _async_setup_bike_entry(hass, entry):
-            return False
-    elif not await _async_setup_stop_entry(hass, entry):
+        coordinator = data.bikes
+        device_id = _register_station(entry, coordinator, interval)
+    else:
+        coordinator = data.departures
+        device_id = _register_stop(hass, entry, coordinator, interval)
+    if device_id is None:
         return False
+
+    _remove_stale_devices(hass, entry, (DOMAIN, device_id))
+    _schedule_refresh(hass, entry, coordinator)
+    entry.runtime_data = coordinator
 
     # Reload the entry when its options change
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -211,17 +235,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bo
     return True
 
 
-async def _async_setup_stop_entry(
-    hass: HomeAssistant, entry: NaolibConfigEntry
-) -> bool:
-    """Register a stop on the departures coordinator."""
-    coordinator = hass.data[DOMAIN].coordinator
-
+def _register_stop(
+    hass: HomeAssistant,
+    entry: NaolibConfigEntry,
+    coordinator: NaolibDeparturesCoordinator,
+    interval: int,
+) -> str | None:
+    """Register a stop on the departures coordinator; return its device id."""
     stop_code = entry.data.get(CONF_STOP_CODE)
     quays = entry.data.get(CONF_QUAYS)
     if not stop_code:
         _LOGGER.error("Stop code missing from configuration")
-        return False
+        return None
 
     # Backfill the unique_id for entries created before it was introduced
     if entry.unique_id is None:
@@ -248,56 +273,36 @@ async def _async_setup_stop_entry(
             translation_placeholders={"stop": entry.title},
         )
 
-    coordinator.register_stop(
+    coordinator.register(
         entry.entry_id,
         NaolibStop(
             code=stop_code,
             name=entry.data.get(CONF_STOP_LABEL) or stop_code,
             quays=quays or [],
-            interval=int(
-                entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
-            ),
+            interval=interval,
         ),
     )
-
-    _remove_stale_devices(hass, entry, (DOMAIN, stop_code))
-
-    # The endpoint is rate-limited (1 request / 30 s), so setup must not fail or
-    # retry on a transient 429 -- the coordinator will keep polling. A stop
-    # added later needs a refresh too, since the snapshot only holds the quays
-    # that were registered when it was taken; the debouncer collapses the
-    # requests fired when several entries are set up at once.
-    _schedule_refresh(hass, entry, coordinator)
-    entry.runtime_data = coordinator
-    return True
+    return str(stop_code)
 
 
-async def _async_setup_bike_entry(
-    hass: HomeAssistant, entry: NaolibConfigEntry
-) -> bool:
-    """Register a bike station on the bike coordinator."""
-    coordinator = hass.data[DOMAIN].bike_coordinator
-
+def _register_station(
+    entry: NaolibConfigEntry, coordinator: NaolibBikeCoordinator, interval: int
+) -> str | None:
+    """Register a bike station on the bike coordinator; return its device id."""
     station_id = entry.data.get(CONF_STATION_ID)
     if not station_id:
         _LOGGER.error("Station id missing from configuration")
-        return False
+        return None
 
-    coordinator.register_station(
+    coordinator.register(
         entry.entry_id,
         NaolibBikeStation(
             id=station_id,
             name=entry.data.get(CONF_STATION_LABEL) or station_id,
-            interval=int(
-                entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
-            ),
+            interval=interval,
         ),
     )
-
-    _remove_stale_devices(hass, entry, (DOMAIN, f"bike_{station_id}"))
-    _schedule_refresh(hass, entry, coordinator)
-    entry.runtime_data = coordinator
-    return True
+    return f"{BIKE_ID_PREFIX}{station_id}"
 
 
 def _remove_stale_devices(
@@ -316,11 +321,16 @@ def _remove_stale_devices(
 
 
 def _schedule_refresh(
-    hass: HomeAssistant,
-    entry: NaolibConfigEntry,
-    coordinator: NaolibGlobalCoordinator | NaolibBikeCoordinator,
+    hass: HomeAssistant, entry: NaolibConfigEntry, coordinator: NaolibCoordinator
 ) -> None:
-    """Warm up the coordinator without blocking (or failing) the setup."""
+    """Warm up the coordinator without blocking (or failing) the setup.
+
+    The departures endpoint is rate-limited (1 request / 30 s), so setup must
+    not fail or retry on a transient 429 -- the coordinator will keep polling.
+    An entry added later needs a refresh too, since the snapshot only holds
+    what was registered when it was taken; the debouncer collapses the
+    requests fired when several entries are set up at once.
+    """
     refresh = (
         coordinator.async_refresh()
         if coordinator.data is None
@@ -359,7 +369,7 @@ async def handle_around_subscribe(
     msg_id = msg["id"]
     live = NaolibLiveAround(
         hass,
-        hass.data[DOMAIN].coordinator,
+        hass.data[DOMAIN].departures,
         f"live:{id(connection)}:{msg_id}",
         lambda data: connection.send_message(websocket_api.event_message(msg_id, data)),
         entity_id=msg["entity_id"],
@@ -390,7 +400,7 @@ async def handle_get_data(
     sensor attributes.
     """
     stop_code = msg["stop_code"]
-    if hass.data[DOMAIN].coordinator.stop_by_code(stop_code) is None:
+    if hass.data[DOMAIN].departures.stop_by_code(stop_code) is None:
         connection.send_error(
             msg["id"], "stop_not_found", f"Stop code {stop_code} not found"
         )
@@ -426,10 +436,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> b
     """
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
-        if _is_bike(entry):
-            hass.data[DOMAIN].bike_coordinator.unregister_station(entry.entry_id)
-        else:
-            hass.data[DOMAIN].coordinator.unregister_stop(entry.entry_id)
+        entry.runtime_data.unregister(entry.entry_id)
     return unloaded
 
 

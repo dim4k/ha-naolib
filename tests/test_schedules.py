@@ -60,7 +60,10 @@ def test_load_station_timetable_unknown_station() -> None:
 
 def test_missing_data_files_are_tolerated(tmp_path) -> None:
     """A stripped-down install degrades to empty data instead of crashing."""
-    with patch.object(schedules, "_BASE_PATH", tmp_path):
+    with (
+        patch.object(schedules, "_BASE_PATH", tmp_path),
+        patch.object(schedules, "_DB_PATH", tmp_path / "schedules.sqlite"),
+    ):
         assert schedules.load_calendar() == {}
         assert schedules.load_station_timetable("whatever") == {}
 

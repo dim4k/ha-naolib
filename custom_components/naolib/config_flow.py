@@ -22,6 +22,7 @@ import voluptuous as vol
 
 from .bike import GbfsUnavailableError, async_fetch_stations
 from .const import (
+    BIKE_ID_PREFIX,
     CONF_ENTRY_TYPE,
     CONF_LOCATION,
     CONF_QUAYS,
@@ -37,13 +38,9 @@ from .const import (
     MAX_UPDATE_INTERVAL,
     MIN_UPDATE_INTERVAL,
 )
-from .stops import load_stops, nearby_stops, nearest, normalize
+from .stops import load_stops, nearest, normalize
 
 _LOGGER = logging.getLogger(__name__)
-
-# A bike station and a stop could share an identifier, so station entries get
-# their own unique_id namespace.
-BIKE_UNIQUE_ID_PREFIX = "bike_"
 
 
 class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -117,21 +114,15 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(step_id="by_location", data_schema=schema)
 
         location = user_input[CONF_LOCATION]
-        errors: dict[str, str] = {}
-        try:
-            self._stops = await self.hass.async_add_executor_job(
-                nearby_stops, location["latitude"], location["longitude"]
-            )
-        except Exception:
-            _LOGGER.exception("Failed to search for Naolib stops")
-            errors["base"] = "unknown"
-        else:
-            if self._stops:
-                return await self.async_step_select_stop()
-            errors["base"] = "no_stops_found"
+        stops = await self.hass.async_add_executor_job(load_stops)
+        self._stops = nearest(stops, location["latitude"], location["longitude"])
+        if self._stops:
+            return await self.async_step_select_stop()
 
         return self.async_show_form(
-            step_id="by_location", data_schema=schema, errors=errors
+            step_id="by_location",
+            data_schema=schema,
+            errors={"base": "no_stops_found"},
         )
 
     async def _async_fetch_stations(self) -> list[dict[str, Any]] | None:
@@ -198,7 +189,7 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         station_id = station["id"]
         return await self._async_save(
-            unique_id=f"{BIKE_UNIQUE_ID_PREFIX}{station_id}",
+            unique_id=f"{BIKE_ID_PREFIX}{station_id}",
             title=f"Station vélo : {station['name']}",
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_BIKE,

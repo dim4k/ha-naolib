@@ -73,7 +73,7 @@ def _at(hass: HomeAssistant, lat: float, lon: float) -> None:
 
 def _live_keys(hass: HomeAssistant) -> list[str]:
     return [
-        key for key in hass.data[DOMAIN].coordinator.stops if key.startswith("live:")
+        key for key in hass.data[DOMAIN].departures.tracked if key.startswith("live:")
     ]
 
 
@@ -242,7 +242,7 @@ async def test_stopping_before_the_start_finishes_is_clean(
     """A subscription closed while its stops load leaves no listener behind."""
     await _setup(hass)
     _at(hass, _LAT, _LON)
-    coordinator = hass.data[DOMAIN].coordinator
+    coordinator = hass.data[DOMAIN].departures
     sent: list = []
     live = NaolibLiveAround(
         hass,

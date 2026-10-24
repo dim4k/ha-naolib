@@ -10,6 +10,7 @@ any extra request.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
@@ -19,20 +20,18 @@ from typing import Any
 import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from .const import (
     API_TIMEOUT,
     BIKE_NEARBY_LIMIT,
     BIKE_NEARBY_RADIUS_M,
-    DEFAULT_UPDATE_INTERVAL,
-    DOMAIN,
     GBFS_INFO_TTL,
     GBFS_STATION_INFORMATION_URL,
     GBFS_STATION_STATUS_URL,
 )
-from .stops import haversine
+from .coordinator import NaolibSharedCoordinator
+from .stops import nearest
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -172,9 +171,7 @@ async def _async_get_json(
 ) -> dict[str, Any] | None:
     """Fetch a GBFS document, or None when it cannot be read."""
     try:
-        async with session.get(
-            url, timeout=aiohttp.ClientTimeout(total=API_TIMEOUT)
-        ) as response:
+        async with asyncio.timeout(API_TIMEOUT), session.get(url) as response:
             response.raise_for_status()
             document: dict[str, Any] = await response.json(content_type=None)
             return document
@@ -196,43 +193,19 @@ async def async_fetch_stations(
     return parse_stations(payload)
 
 
-class NaolibBikeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
+# The bike network, keyed by station id.
+type Stations = dict[str, dict[str, Any]]
+
+
+class NaolibBikeCoordinator(NaolibSharedCoordinator[NaolibBikeStation, Stations]):
     """Poll the whole bike network and index stations by id."""
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize the shared bike coordinator."""
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=f"{DOMAIN}_bike",
-            # Shared across config entries, like the departures coordinator.
-            config_entry=None,
-            update_interval=timedelta(seconds=DEFAULT_UPDATE_INTERVAL),
-        )
+        super().__init__(hass, "bike", "GBFS")
         self._session = async_get_clientsession(hass)
-        # Keyed by config entry id, so a reconfigured entry cleans up properly.
-        self.stations: dict[str, NaolibBikeStation] = {}
-        self._info: dict[str, dict[str, Any]] = {}
+        self._info: Stations = {}
         self._info_expires: datetime | None = None
-        self._unavailable_logged = False
-
-    def register_station(self, entry_id: str, station: NaolibBikeStation) -> None:
-        """Start serving a configured station."""
-        self.stations[entry_id] = station
-        self._apply_interval()
-
-    def unregister_station(self, entry_id: str) -> None:
-        """Stop serving a configured station."""
-        self.stations.pop(entry_id, None)
-        self._apply_interval()
-
-    def _apply_interval(self) -> None:
-        """Use the shortest requested interval across all stations."""
-        seconds = min(
-            (station.interval for station in self.stations.values()),
-            default=DEFAULT_UPDATE_INTERVAL,
-        )
-        self.update_interval = timedelta(seconds=seconds)
 
     async def _async_refresh_info(self) -> None:
         """Refetch the station descriptions when the cache expires."""
@@ -248,23 +221,12 @@ class NaolibBikeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._info = {station["id"]: station for station in parsed}
         self._info_expires = now + timedelta(seconds=GBFS_INFO_TTL)
 
-    def _keep_last_snapshot(self) -> dict[str, dict[str, Any]]:
-        """Serve the previous snapshot rather than flagging entities down."""
-        if self.data is None:
-            raise UpdateFailed("Error fetching data from the Naolib GBFS API")
-        if not self._unavailable_logged:
-            _LOGGER.warning(
-                "The Naolib GBFS API is unavailable, serving the last known stations"
-            )
-            self._unavailable_logged = True
-        return self.data
-
-    async def _async_update_data(self) -> dict[str, dict[str, Any]]:
+    async def _async_update_data(self) -> Stations:
         """Fetch the whole bike network once."""
         await self._async_refresh_info()
         payload = await _async_get_json(self._session, GBFS_STATION_STATUS_URL)
         if payload is None or not self._info:
-            return self._keep_last_snapshot()
+            return self._serve_last_snapshot()
 
         status = parse_status(payload)
         network = {
@@ -273,45 +235,37 @@ class NaolibBikeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             if station_id in status
         }
         if not network:
-            return self._keep_last_snapshot()
+            return self._serve_last_snapshot()
 
-        if self._unavailable_logged:
-            _LOGGER.info("The Naolib GBFS API is available again")
-            self._unavailable_logged = False
+        self._mark_available()
         return network
 
 
-def build_station_data(
-    network: dict[str, dict[str, Any]],
-    station: NaolibBikeStation,
-) -> dict[str, Any]:
+def build_station_data(network: Stations, station: NaolibBikeStation) -> dict[str, Any]:
     """Build the data of one station, with its neighbours, for the card."""
     current = network.get(station.id)
     if current is None:
         return {"available": False, "nearby_stations": []}
 
-    neighbours = []
-    for other in network.values():
-        if other["id"] == station.id:
-            continue
-        distance = round(
-            haversine(current["lat"], current["lon"], other["lat"], other["lon"])
+    neighbours = [
+        {
+            "station_id": other["id"],
+            "name": other["name"],
+            "distance": other["distance"],
+            "bikes": other["bikes"],
+            "docks": other["docks"],
+            "capacity": other["capacity"],
+            "is_renting": other["is_renting"],
+            "is_returning": other["is_returning"],
+        }
+        for other in nearest(
+            (other for other in network.values() if other["id"] != station.id),
+            current["lat"],
+            current["lon"],
+            limit=BIKE_NEARBY_LIMIT,
+            radius=BIKE_NEARBY_RADIUS_M,
         )
-        if distance > BIKE_NEARBY_RADIUS_M:
-            continue
-        neighbours.append(
-            {
-                "station_id": other["id"],
-                "name": other["name"],
-                "distance": distance,
-                "bikes": other["bikes"],
-                "docks": other["docks"],
-                "capacity": other["capacity"],
-                "is_renting": other["is_renting"],
-                "is_returning": other["is_returning"],
-            }
-        )
-    neighbours.sort(key=lambda item: item["distance"])
+    ]
 
     return {
         "available": True,
@@ -326,5 +280,5 @@ def build_station_data(
         "is_renting": current["is_renting"],
         "is_returning": current["is_returning"],
         "last_reported": current["last_reported"],
-        "nearby_stations": neighbours[:BIKE_NEARBY_LIMIT],
+        "nearby_stations": neighbours,
     }

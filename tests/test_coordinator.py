@@ -12,7 +12,7 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.naolib.const import API_MIN_SPACING
 from custom_components.naolib.coordinator import (
-    NaolibGlobalCoordinator,
+    NaolibDeparturesCoordinator,
     NaolibStop,
     build_stop_data,
     filter_departures,
@@ -77,16 +77,16 @@ def test_walk_time_drops_unreachable_departures() -> None:
 
 async def test_stop_registry_drives_quays_and_interval(hass: HomeAssistant) -> None:
     """Registered stops define what is polled, and how often."""
-    coordinator = NaolibGlobalCoordinator(hass)
+    coordinator = NaolibDeparturesCoordinator(hass)
 
-    coordinator.register_stop("entry1", _stop("STOP1", quays=["Q1"], interval=120))
+    coordinator.register("entry1", _stop("STOP1", quays=["Q1"], interval=120))
     assert coordinator.update_interval == timedelta(seconds=120)
 
-    coordinator.register_stop("entry2", _stop("STOP2", quays=["Q2"], interval=30))
+    coordinator.register("entry2", _stop("STOP2", quays=["Q2"], interval=30))
     assert coordinator.update_interval == timedelta(seconds=30)
     assert coordinator.stop_by_code("STOP2").quays == ["Q2"]
 
-    coordinator.unregister_stop("entry2")
+    coordinator.unregister("entry2")
     assert coordinator.stop_by_code("STOP2") is None
     assert coordinator.update_interval == timedelta(seconds=120)
 
@@ -173,8 +173,8 @@ def test_build_stop_data_defaults_unknown_mode_and_direction() -> None:
 
 async def test_update_fails_when_there_is_nothing_to_serve(hass: HomeAssistant) -> None:
     """A failure on the very first fetch surfaces as an update failure."""
-    coordinator = NaolibGlobalCoordinator(hass)
-    coordinator.register_stop("entry1", _stop())
+    coordinator = NaolibDeparturesCoordinator(hass)
+    coordinator.register("entry1", _stop())
 
     with (
         patch.object(coordinator.api, "async_get_all_departures", return_value=None),
@@ -188,8 +188,8 @@ async def test_transient_failure_serves_the_last_snapshot(
 ) -> None:
     """The last snapshot is kept, and the outage is logged once per episode."""
     caplog.set_level(logging.INFO)
-    coordinator = NaolibGlobalCoordinator(hass)
-    coordinator.register_stop("entry1", _stop())
+    coordinator = NaolibDeparturesCoordinator(hass)
+    coordinator.register("entry1", _stop())
     snapshot = {"QUAY1": []}
     coordinator.data = snapshot
 
@@ -215,8 +215,8 @@ async def test_transient_failure_serves_the_last_snapshot(
 
 async def test_refresh_requests_wait_for_the_rate_limit(hass: HomeAssistant) -> None:
     """A refresh asked too soon after a call waits for the window to end."""
-    coordinator = NaolibGlobalCoordinator(hass)
-    coordinator.register_stop("e1", NaolibStop("S1", "A", ["Q1"], 60))
+    coordinator = NaolibDeparturesCoordinator(hass)
+    coordinator.register("e1", NaolibStop("S1", "A", ["Q1"], 60))
     clock = [1000.0]
     with (
         patch(
@@ -244,4 +244,4 @@ async def test_refresh_requests_wait_for_the_rate_limit(hass: HomeAssistant) -> 
         await hass.async_block_till_done()
         assert fetch.call_count == 2
 
-    coordinator.unregister_stop("e1")
+    coordinator.unregister("e1")

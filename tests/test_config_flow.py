@@ -79,13 +79,8 @@ async def _start(hass: HomeAssistant) -> dict:
     return await _menu(hass, "stop", "by_location")
 
 
-async def _search(hass: HomeAssistant, flow_id: str, stops: list | Exception) -> dict:
-    kwargs = (
-        {"side_effect": stops}
-        if isinstance(stops, Exception)
-        else {"return_value": stops}
-    )
-    with patch("custom_components.naolib.config_flow.nearby_stops", **kwargs):
+async def _search(hass: HomeAssistant, flow_id: str, stops: list) -> dict:
+    with patch("custom_components.naolib.config_flow.nearest", return_value=stops):
         return await hass.config_entries.flow.async_configure(flow_id, _LOCATION)
 
 
@@ -150,15 +145,6 @@ async def test_no_stop_nearby(hass: HomeAssistant) -> None:
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "no_stops_found"}
-
-
-async def test_search_failure_is_reported(hass: HomeAssistant) -> None:
-    """A failing lookup is surfaced instead of aborting the flow."""
-    result = await _start(hass)
-    result = await _search(hass, result["flow_id"], OSError("boom"))
-
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"base": "unknown"}
 
 
 async def test_already_configured_stop(hass: HomeAssistant) -> None:

@@ -20,6 +20,10 @@ CONF_UPDATE_INTERVAL: str = "update_interval"
 ENTRY_TYPE_STOP: str = "stop"
 ENTRY_TYPE_BIKE: str = "bike"
 
+# A bike station and a stop could share an identifier, so the unique ids and
+# device identifiers of stations carry this prefix.
+BIKE_ID_PREFIX: str = "bike_"
+
 # "Around me" card: follow a person/zone/device_tracker and stream the stops
 # within a radius, recomputed as the entity moves.
 DEFAULT_AROUND_RADIUS: int = 500
@@ -38,6 +42,9 @@ ATTR_LINES: str = "lines"
 ATTR_DIRECTION: str = "direction"
 ATTR_WALK_TIME: str = "walk_time"
 ATTR_LIMIT: str = "limit"
+# Bounds of the action's options (the walk time mirrors the card's).
+MAX_WALK_TIME: int = 60
+MAX_DEPARTURES_LIMIT: int = 50
 
 # Polling / network defaults
 DEFAULT_UPDATE_INTERVAL: int = 60
@@ -85,6 +92,9 @@ CALENDAR_FILE: str = "data/calendar.json"
 
 # How far ahead the card may ask for a timetable, in days.
 MAX_TIMETABLE_DAY_OFFSET: int = 6
+
+# Departures before this hour belong to the tail of the previous service day.
+SERVICE_DAY_CUTOFF_HOUR: int = 4
 
 # Number of stops or bike stations proposed when searching around a location.
 NEARBY_LIMIT: int = 15

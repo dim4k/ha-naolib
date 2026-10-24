@@ -11,6 +11,7 @@ on a given date (regular days + exceptions).
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import closing
 from datetime import date
 from functools import lru_cache
 import json
@@ -20,11 +21,12 @@ import sqlite3
 from typing import Any
 import zlib
 
-from .const import CALENDAR_FILE, SCHEDULES_DB
+from .const import CALENDAR_FILE, SCHEDULES_DB, SERVICE_DAY_CUTOFF_HOUR
 
 _LOGGER = logging.getLogger(__name__)
 
 _BASE_PATH = Path(__file__).parent
+_DB_PATH = _BASE_PATH / SCHEDULES_DB
 
 
 @lru_cache(maxsize=1)
@@ -33,12 +35,18 @@ def load_calendar() -> dict[str, dict[str, Any]]:
 
     This performs blocking file IO and must be called from an executor.
     """
-    path = _BASE_PATH / CALENDAR_FILE
-    if not path.exists():
+    try:
+        with (_BASE_PATH / CALENDAR_FILE).open(encoding="utf-8") as fh:
+            calendar: dict[str, dict[str, Any]] = json.load(fh)
+            return calendar
+    except (OSError, ValueError) as exception:
+        _LOGGER.error("Could not read the embedded calendar: %s", exception)
         return {}
-    with path.open(encoding="utf-8") as fh:
-        calendar: dict[str, dict[str, Any]] = json.load(fh)
-        return calendar
+
+
+def _connect() -> closing[sqlite3.Connection]:
+    """Open the embedded timetables read-only; close them on leaving the block."""
+    return closing(sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True))
 
 
 # A station's timetable is a few dozen kilobytes, and only the configured stops
@@ -49,18 +57,14 @@ def load_station_timetable(station_id: str) -> dict[str, dict[str, Any]]:
 
     This performs blocking file IO and must be called from an executor.
     """
-    path = _BASE_PATH / SCHEDULES_DB
-    if not path.exists():
+    if not _DB_PATH.exists():
         return {}
     try:
-        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-        try:
+        with _connect() as connection:
             row = connection.execute(
                 "SELECT payload FROM station_schedules WHERE station_id = ?",
                 (station_id,),
             ).fetchone()
-        finally:
-            connection.close()
     except sqlite3.Error as exception:
         _LOGGER.error("Could not read the embedded timetables: %s", exception)
         return {}
@@ -81,14 +85,10 @@ def timetables_info() -> dict[str, Any]:
     This performs blocking file IO and must be called from an executor.
     """
     info: dict[str, Any] = {}
-    path = _BASE_PATH / SCHEDULES_DB
-    if path.exists():
+    if _DB_PATH.exists():
         try:
-            connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-            try:
+            with _connect() as connection:
                 info.update(connection.execute("SELECT key, value FROM meta"))
-            finally:
-                connection.close()
         except sqlite3.Error as exception:
             info["error"] = str(exception)
     end = calendar_end()
@@ -163,7 +163,9 @@ def _active_times(
 def _service_day_key(value: str) -> int:
     """Sort ``HHMM`` within the service day, small hours counting as the tail."""
     hour = int(value[:2])
-    return (hour + 24 if hour < 4 else hour) * 60 + int(value[2:])
+    if hour < SERVICE_DAY_CUTOFF_HOUR:
+        hour += 24
+    return hour * 60 + int(value[2:])
 
 
 def last_departures(station_id: str, today: date) -> dict[str, str]:

@@ -393,9 +393,9 @@ async def test_coordinator_uses_the_shortest_interval(hass: HomeAssistant) -> No
     """Registered stations drive the polling interval."""
     coordinator = NaolibBikeCoordinator(hass)
 
-    coordinator.register_station("a", NaolibBikeStation(id="1", name="A", interval=120))
-    coordinator.register_station("b", NaolibBikeStation(id="2", name="B", interval=30))
+    coordinator.register("a", NaolibBikeStation(id="1", name="A", interval=120))
+    coordinator.register("b", NaolibBikeStation(id="2", name="B", interval=30))
     assert coordinator.update_interval.total_seconds() == 30
 
-    coordinator.unregister_station("b")
+    coordinator.unregister("b")
     assert coordinator.update_interval.total_seconds() == 120

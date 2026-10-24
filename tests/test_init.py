@@ -85,14 +85,14 @@ async def test_setup_and_unload(hass: HomeAssistant) -> None:
     await _setup(hass, entry)
 
     assert entry.state is ConfigEntryState.LOADED
-    coordinator = hass.data[DOMAIN].coordinator
-    stop = coordinator.stops[entry.entry_id]
+    coordinator = hass.data[DOMAIN].departures
+    stop = coordinator.tracked[entry.entry_id]
     assert stop.code == "STOP1"
     assert stop.quays == ["QUAY1"]
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    assert coordinator.stops == {}
+    assert coordinator.tracked == {}
 
 
 async def test_entries_share_one_coordinator(hass: HomeAssistant) -> None:
@@ -103,7 +103,7 @@ async def test_entries_share_one_coordinator(hass: HomeAssistant) -> None:
     await _setup(hass, second)
 
     assert first.runtime_data is second.runtime_data
-    assert len(first.runtime_data.stops) == 2
+    assert len(first.runtime_data.tracked) == 2
 
 
 async def test_get_departures_action(hass: HomeAssistant) -> None:
@@ -158,7 +158,7 @@ async def test_legacy_entry_is_backfilled(hass: HomeAssistant) -> None:
     await _setup(hass, entry)
 
     assert entry.unique_id == "STOP1"
-    assert entry.runtime_data.stops[entry.entry_id].quays == []
+    assert entry.runtime_data.tracked[entry.entry_id].quays == []
 
 
 async def test_changing_the_options_reloads_the_entry(hass: HomeAssistant) -> None:
@@ -379,12 +379,12 @@ async def test_bike_setup_and_unload(hass: HomeAssistant) -> None:
     await _setup_bike(hass, entry)
 
     assert entry.state is ConfigEntryState.LOADED
-    coordinator = hass.data[DOMAIN].bike_coordinator
-    assert coordinator.stations[entry.entry_id].id == "1"
+    coordinator = hass.data[DOMAIN].bikes
+    assert coordinator.tracked[entry.entry_id].id == "1"
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    assert coordinator.stations == {}
+    assert coordinator.tracked == {}
 
 
 async def test_bike_setup_fails_without_a_station_id(hass: HomeAssistant) -> None:
@@ -431,7 +431,7 @@ async def test_bike_entries_share_one_coordinator(hass: HomeAssistant) -> None:
     await _setup_bike(hass, second)
 
     assert first.runtime_data is second.runtime_data
-    assert len(first.runtime_data.stations) == 2
+    assert len(first.runtime_data.tracked) == 2
 
 
 async def test_action_rejects_a_bike_entry(hass: HomeAssistant) -> None:

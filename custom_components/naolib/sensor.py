@@ -16,8 +16,8 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .bike import NaolibBikeCoordinator, NaolibBikeStation, build_station_data
-from .const import DOMAIN
-from .coordinator import NaolibGlobalCoordinator, NaolibStop, build_stop_data
+from .const import BIKE_ID_PREFIX, DOMAIN
+from .coordinator import NaolibDeparturesCoordinator, NaolibStop, build_stop_data
 
 if TYPE_CHECKING:
     from . import NaolibConfigEntry
@@ -35,7 +35,7 @@ async def async_setup_entry(
     """Set up the sensors based on the config entry."""
     coordinator = entry.runtime_data
     if isinstance(coordinator, NaolibBikeCoordinator):
-        station = coordinator.stations[entry.entry_id]
+        station = coordinator.tracked[entry.entry_id]
         async_add_entities(
             [
                 NaolibBikesAvailableSensor(coordinator, station),
@@ -45,12 +45,12 @@ async def async_setup_entry(
         return
 
     async_add_entities(
-        [NaolibNextDeparturesSensor(coordinator, coordinator.stops[entry.entry_id])]
+        [NaolibNextDeparturesSensor(coordinator, coordinator.tracked[entry.entry_id])]
     )
 
 
 class NaolibNextDeparturesSensor(
-    CoordinatorEntity[NaolibGlobalCoordinator], SensorEntity
+    CoordinatorEntity[NaolibDeparturesCoordinator], SensorEntity
 ):
     """Represent the next bus at the stop."""
 
@@ -66,7 +66,7 @@ class NaolibNextDeparturesSensor(
 
     def __init__(
         self,
-        coordinator: NaolibGlobalCoordinator,
+        coordinator: NaolibDeparturesCoordinator,
         stop: NaolibStop,
     ) -> None:
         """Initialize the sensor."""
@@ -120,7 +120,7 @@ class NaolibBikeStationSensor(CoordinatorEntity[NaolibBikeCoordinator], SensorEn
         super().__init__(coordinator)
         self._station = station
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"bike_{station.id}")},
+            identifiers={(DOMAIN, f"{BIKE_ID_PREFIX}{station.id}")},
             name=f"Station vélo {station.name}",
             manufacturer="Naolib",
             model="Station vélo",

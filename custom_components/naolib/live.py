@@ -22,8 +22,8 @@ from homeassistant.core import (
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 
 from .const import AROUND_DEBOUNCE, DEFAULT_UPDATE_INTERVAL
-from .coordinator import NaolibGlobalCoordinator, NaolibStop, build_stop_data
-from .stops import load_stops, within
+from .coordinator import NaolibDeparturesCoordinator, NaolibStop, build_stop_data
+from .stops import load_stops, nearest
 
 
 class NaolibLiveAround:
@@ -32,7 +32,7 @@ class NaolibLiveAround:
     def __init__(
         self,
         hass: HomeAssistant,
-        coordinator: NaolibGlobalCoordinator,
+        coordinator: NaolibDeparturesCoordinator,
         key: str,
         send: Callable[[dict[str, Any]], None],
         *,
@@ -84,7 +84,7 @@ class NaolibLiveAround:
             self._cancel_debounce()
             self._cancel_debounce = None
         for key in self._stops:
-            self._coordinator.unregister_stop(key)
+            self._coordinator.unregister(key)
         self._stops.clear()
 
     @callback
@@ -121,7 +121,9 @@ class NaolibLiveAround:
         nearby = (
             []
             if coords is None
-            else within(self._catalog, *coords, self._radius, self._max_stops)
+            else nearest(
+                self._catalog, *coords, limit=self._max_stops, radius=self._radius
+            )
         )
         wanted = {f"{self._key}:{stop['id']}": stop for stop in nearby}
 
@@ -136,12 +138,12 @@ class NaolibLiveAround:
                 quays=place.get("quays") or [],
                 interval=DEFAULT_UPDATE_INTERVAL,
             )
-            self._coordinator.register_stop(key, stop)
+            self._coordinator.register(key, stop)
             self._stops[key] = (stop, place["distance"])
             added = True
 
         for key in [key for key in self._stops if key not in wanted]:
-            self._coordinator.unregister_stop(key)
+            self._coordinator.unregister(key)
             del self._stops[key]
 
         if added:

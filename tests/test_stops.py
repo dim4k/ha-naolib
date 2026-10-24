@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from custom_components.naolib.stops import load_stops, nearby_stops, normalize, within
+from custom_components.naolib.stops import load_stops, nearest, normalize
 
 # Commerce, in the centre of Nantes.
 _LAT, _LON = 47.2143, -1.5595
@@ -18,7 +18,7 @@ def test_load_stops_is_not_empty() -> None:
 
 def test_nearby_stops_are_sorted_by_distance() -> None:
     """Results are the closest stops, nearest first, capped by ``limit``."""
-    stops = nearby_stops(_LAT, _LON, limit=5)
+    stops = nearest(load_stops(), _LAT, _LON, limit=5)
 
     assert len(stops) == 5
     distances = [stop["distance"] for stop in stops]
@@ -39,22 +39,22 @@ def test_normalize_folds_case_and_accents() -> None:
     assert normalize("Gare de l'État") == normalize("GARE DE L'ETAT")
 
 
-def test_within_keeps_only_places_inside_the_radius() -> None:
-    """``within`` drops places beyond the radius and sorts the rest."""
+def test_radius_keeps_only_places_inside_it() -> None:
+    """``radius`` drops places beyond it and the rest stay sorted."""
     places = [
         {"id": "near", "lat": _LAT, "lon": _LON},
         {"id": "mid", "lat": _LAT + 0.002, "lon": _LON},  # ~222 m
         {"id": "far", "lat": _LAT + 0.05, "lon": _LON},  # ~5.5 km
     ]
 
-    result = within(places, _LAT, _LON, radius=300, limit=10)
+    result = nearest(places, _LAT, _LON, limit=10, radius=300)
 
     assert [place["id"] for place in result] == ["near", "mid"]
     assert result[0]["distance"] <= result[1]["distance"]
 
 
-def test_within_caps_to_the_limit() -> None:
-    """``within`` returns at most ``limit`` places."""
+def test_radius_still_caps_to_the_limit() -> None:
+    """With a radius, at most ``limit`` places are returned."""
     places = [{"id": str(i), "lat": _LAT, "lon": _LON} for i in range(5)]
 
-    assert len(within(places, _LAT, _LON, radius=100, limit=2)) == 2
+    assert len(nearest(places, _LAT, _LON, limit=2, radius=100)) == 2

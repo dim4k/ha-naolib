@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from functools import lru_cache
 import json
 import logging
@@ -46,43 +47,25 @@ def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def nearest(
-    places: list[dict[str, Any]], lat: float, lon: float, limit: int = NEARBY_LIMIT
+    places: Iterable[dict[str, Any]],
+    lat: float,
+    lon: float,
+    limit: int = NEARBY_LIMIT,
+    radius: float | None = None,
 ) -> list[dict[str, Any]]:
     """Return the closest places to a location, with their distance in meters.
 
     ``places`` are stops or bike stations: anything with ``lat`` and ``lon``.
+    ``radius`` drops the places farther away than that many meters.
     """
     scored = [
         {**place, "distance": round(haversine(lat, lon, place["lat"], place["lon"]))}
         for place in places
     ]
+    if radius is not None:
+        scored = [place for place in scored if place["distance"] <= radius]
     scored.sort(key=lambda place: place["distance"])
     return scored[:limit]
-
-
-def nearby_stops(
-    lat: float, lon: float, limit: int = NEARBY_LIMIT
-) -> list[dict[str, Any]]:
-    """Return the closest stops to a location.
-
-    This performs blocking file IO and must be called from an executor.
-    """
-    return nearest(load_stops(), lat, lon, limit)
-
-
-def within(
-    places: list[dict[str, Any]], lat: float, lon: float, radius: float, limit: int
-) -> list[dict[str, Any]]:
-    """Return the places within ``radius`` meters, nearest first, capped.
-
-    ``places`` are stops or bike stations: anything with ``lat`` and ``lon``.
-    """
-    scored = [
-        {**place, "distance": round(haversine(lat, lon, place["lat"], place["lon"]))}
-        for place in places
-    ]
-    scored.sort(key=lambda place: place["distance"])
-    return [place for place in scored if place["distance"] <= radius][:limit]
 
 
 def normalize(value: str) -> str:

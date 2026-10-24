@@ -1,9 +1,10 @@
-"""Shared real-time coordinator and per-stop formatting for Naolib.
+"""Shared coordinators, and the real-time departures of each stop.
 
-A single :class:`NaolibGlobalCoordinator` polls the whole Naolib network once per
-update interval and stores every departure indexed by quay. Each configured
-stop then filters and formats the departures it cares about locally, so the
-rate-limited endpoint is hit only once regardless of how many stops are set up.
+A shared coordinator polls a whole Naolib network once per update interval for
+every config entry that reads it. :class:`NaolibDeparturesCoordinator` stores
+every departure indexed by quay; each configured stop then filters and formats
+the departures it cares about locally, so the rate-limited endpoint is hit only
+once regardless of how many stops are set up.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 import logging
 import time
-from typing import Any
+from typing import Any, Protocol
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
@@ -22,7 +23,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .api import NaolibApiClient
-from .bike import NaolibBikeCoordinator
 from .const import API_MIN_SPACING, DEFAULT_UPDATE_INTERVAL, DOMAIN
 from .schedules import last_departures
 
@@ -34,6 +34,82 @@ _VEHICLE_TYPE = {"tram": 1, "bus": 3, "ferry": 4}
 
 # Map SIRI DirectionName (aller/retour) to the legacy 1/2 direction.
 _DIRECTION = {"A": 1, "R": 2}
+
+# The departures of the whole network, keyed by quay.
+type Departures = dict[str, list[dict[str, Any]]]
+
+
+class _Tracked(Protocol):
+    """Anything a shared coordinator serves: it asks for its own interval."""
+
+    interval: int
+
+
+class NaolibSharedCoordinator[ItemT: _Tracked, DataT](DataUpdateCoordinator[DataT]):
+    """Poll a whole network once for everything registered on it."""
+
+    def __init__(self, hass: HomeAssistant, name: str, source: str) -> None:
+        """Initialize the shared coordinator."""
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"{DOMAIN}_{name}",
+            # The coordinator is shared across every config entry, so it is not
+            # tied to a single one; passing None silences the deprecation
+            # warning without binding its lifecycle to one entry.
+            config_entry=None,
+            update_interval=timedelta(seconds=DEFAULT_UPDATE_INTERVAL),
+        )
+        # Keyed by config entry id (or live subscription key): a reconfigured
+        # entry changes stop or station, so only its key reliably identifies
+        # what to drop on unload.
+        self.tracked: dict[str, ItemT] = {}
+        # Names the upstream API in the logs.
+        self._source = source
+        self._unavailable_logged = False
+
+    def register(self, key: str, item: ItemT) -> None:
+        """Start serving a stop or a station."""
+        self.tracked[key] = item
+        self._apply_interval()
+
+    def unregister(self, key: str) -> None:
+        """Stop serving a stop or a station."""
+        self.tracked.pop(key, None)
+        self._apply_interval()
+
+    def _apply_interval(self) -> None:
+        """Use the shortest requested interval across everything tracked."""
+        seconds = min(
+            (item.interval for item in self.tracked.values()),
+            default=DEFAULT_UPDATE_INTERVAL,
+        )
+        self.update_interval = timedelta(seconds=seconds)
+
+    def _serve_last_snapshot(self) -> DataT:
+        """Keep serving the last snapshot through a transient failure.
+
+        Rate limits, gateway errors and timeouts would otherwise flag every
+        entity "unavailable" on each hiccup. Only a failure with nothing to
+        fall back on is an update failure.
+        """
+        if self.data is None:
+            raise UpdateFailed(
+                f"Error fetching data from the Naolib {self._source} API"
+            )
+        if not self._unavailable_logged:
+            _LOGGER.warning(
+                "The Naolib %s API is unavailable, serving the last known data",
+                self._source,
+            )
+            self._unavailable_logged = True
+        return self.data
+
+    def _mark_available(self) -> None:
+        """Log the end of an outage, once."""
+        if self._unavailable_logged:
+            _LOGGER.info("The Naolib %s API is available again", self._source)
+            self._unavailable_logged = False
 
 
 @dataclass
@@ -50,26 +126,13 @@ class NaolibStop:
     last_times_date: date | None = None
 
 
-class NaolibGlobalCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any]]]]):
+class NaolibDeparturesCoordinator(NaolibSharedCoordinator[NaolibStop, Departures]):
     """Poll the whole network and index departures by quay."""
 
     def __init__(self, hass: HomeAssistant) -> None:
-        """Initialize the shared coordinator."""
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=f"{DOMAIN}_global",
-            # The coordinator is shared across every config entry, so it is not
-            # tied to a single one; passing None silences the deprecation
-            # warning without binding its lifecycle to one entry.
-            config_entry=None,
-            update_interval=timedelta(seconds=DEFAULT_UPDATE_INTERVAL),
-        )
+        """Initialize the shared departures coordinator."""
+        super().__init__(hass, "departures", "SIRI")
         self.api = NaolibApiClient(hass, async_get_clientsession(hass))
-        # Keyed by config entry id: a reconfigured entry changes stop code, so
-        # only the entry id reliably identifies what to drop on unload.
-        self.stops: dict[str, NaolibStop] = {}
-        self._unavailable_logged = False
         # When the endpoint was last called, and a refresh put off until the
         # rate limit allows the next call.
         self._last_fetch = 0.0
@@ -106,53 +169,27 @@ class NaolibGlobalCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any
         self._deferred_refresh = None
         await super().async_request_refresh()
 
-    def register_stop(self, entry_id: str, stop: NaolibStop) -> None:
-        """Start serving a configured stop."""
-        self.stops[entry_id] = stop
-        self._apply_interval()
-
-    def unregister_stop(self, entry_id: str) -> None:
-        """Stop serving a configured stop."""
-        self.stops.pop(entry_id, None)
-        if not self.stops:
+    def unregister(self, key: str) -> None:
+        """Stop serving a stop; with none left, drop any pending refresh."""
+        super().unregister(key)
+        if not self.tracked:
             self._cancel_deferred()
-        self._apply_interval()
 
     def stop_by_code(self, stop_code: str) -> NaolibStop | None:
-        """Return the configured stop with this code, if any."""
+        """Return the served stop with this code, if any."""
         return next(
-            (stop for stop in self.stops.values() if stop.code == stop_code), None
+            (stop for stop in self.tracked.values() if stop.code == stop_code), None
         )
 
-    def _apply_interval(self) -> None:
-        """Use the shortest requested interval across all stops."""
-        seconds = min(
-            (stop.interval for stop in self.stops.values()),
-            default=DEFAULT_UPDATE_INTERVAL,
-        )
-        self.update_interval = timedelta(seconds=seconds)
-
-    async def _async_update_data(self) -> dict[str, list[dict[str, Any]]]:
+    async def _async_update_data(self) -> Departures:
         """Fetch the whole network once."""
-        wanted = {quay for stop in self.stops.values() for quay in stop.quays}
+        wanted = {quay for stop in self.tracked.values() for quay in stop.quays}
         self._last_fetch = time.monotonic()
         data = await self.api.async_get_all_departures(wanted or None)
         if data is None:
-            if self.data is None:
-                raise UpdateFailed("Error fetching data from the Naolib SIRI API")
-            # Transient failure (rate limit, gateway error, timeout): keep
-            # serving the last known snapshot so entities stay available
-            # instead of flickering "unavailable" on every hiccup.
-            if not self._unavailable_logged:
-                _LOGGER.warning(
-                    "The Naolib API is unavailable, serving the last known departures"
-                )
-                self._unavailable_logged = True
-            return self.data
+            return self._serve_last_snapshot()
 
-        if self._unavailable_logged:
-            _LOGGER.info("The Naolib API is available again")
-            self._unavailable_logged = False
+        self._mark_available()
         await self._async_refresh_last_times()
         return data
 
@@ -164,22 +201,13 @@ class NaolibGlobalCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any
         """
         today = dt_util.now().date()
         # Snapshot: a config entry may be set up or removed while we await.
-        for stop in list(self.stops.values()):
+        for stop in list(self.tracked.values()):
             if stop.last_times_date == today:
                 continue
             stop.last_times = await self.hass.async_add_executor_job(
                 last_departures, stop.code, today
             )
             stop.last_times_date = today
-
-
-@dataclass
-class NaolibData:
-    """State shared by every config entry, stored in ``hass.data``."""
-
-    coordinator: NaolibGlobalCoordinator
-    bike_coordinator: NaolibBikeCoordinator
-    loader_url: str = ""
 
 
 def _humanize(delta_seconds: float) -> str:
@@ -236,13 +264,10 @@ def filter_departures(
     return result
 
 
-def build_stop_data(
-    network: dict[str, list[dict[str, Any]]],
-    stop: NaolibStop,
-) -> dict[str, Any]:
+def build_stop_data(network: Departures, stop: NaolibStop) -> dict[str, Any]:
     """Build the per-stop real-time departures for the card.
 
-    ``network`` is the global coordinator data keyed by quay. The stop's
+    ``network`` is the departures coordinator data keyed by quay. The stop's
     ``last_times`` come from the embedded GTFS data (see
     ``schedules.last_departures``); the full daily timetable comes from
     ``schedules.build_timetable``.
