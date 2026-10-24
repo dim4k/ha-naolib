@@ -70,7 +70,8 @@
             "no_stops_found": "No matching stop found.",
             "no_stations_found": "No matching bike station found.",
             "cannot_connect": "Could not reach the Naolib bike service.",
-            "unknown": "Unexpected error."
+            "unknown": "Unexpected error.",
+            "not_in_list": "Pick an entry from the list."
         },
         "abort": {
             "already_configured": "This stop or station is already configured.",

@@ -70,7 +70,8 @@
             "no_stops_found": "Aucun arrêt correspondant.",
             "no_stations_found": "Aucune station vélo correspondante.",
             "cannot_connect": "Impossible de joindre le service vélo Naolib.",
-            "unknown": "Erreur inattendue."
+            "unknown": "Erreur inattendue.",
+            "not_in_list": "Choisissez un élément de la liste."
         },
         "abort": {
             "already_configured": "Cet arrêt ou cette station est déjà configuré.",

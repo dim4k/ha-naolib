@@ -1,5 +1,6 @@
 """Config flow for the Naolib integration."""
 
+from collections import Counter
 import logging
 from typing import Any
 
@@ -185,14 +186,17 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Choose a bike station among the ones just found."""
-        if user_input is None:
+        station = (
+            None
+            if user_input is None
+            else _find(self._stations, user_input[CONF_STATION_ID])
+        )
+        if station is None:
             return self._show_selection(
-                "select_station", CONF_STATION_ID, self._stations
+                "select_station", CONF_STATION_ID, self._stations, user_input
             )
 
-        station_id = user_input[CONF_STATION_ID]
-        # The selector only accepts one of the stations we just found.
-        station = next(s for s in self._stations if s["id"] == station_id)
+        station_id = station["id"]
         return await self._async_save(
             unique_id=f"{BIKE_UNIQUE_ID_PREFIX}{station_id}",
             title=f"Station vélo : {station['name']}",
@@ -220,12 +224,17 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Choose a stop among the ones just found."""
-        if user_input is None:
-            return self._show_selection("select_stop", CONF_STOP_CODE, self._stops)
+        stop = (
+            None
+            if user_input is None
+            else _find(self._stops, user_input[CONF_STOP_CODE])
+        )
+        if stop is None:
+            return self._show_selection(
+                "select_stop", CONF_STOP_CODE, self._stops, user_input
+            )
 
-        stop_code = user_input[CONF_STOP_CODE]
-        # The selector only accepts one of the stops we just found.
-        stop = next(s for s in self._stops if s["id"] == stop_code)
+        stop_code = stop["id"]
         return await self._async_save(
             unique_id=stop_code,
             title=f"Arrêt : {stop['name']}",
@@ -238,19 +247,21 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _show_selection(
-        self, step_id: str, key: str, places: list[dict[str, Any]]
+        self,
+        step_id: str,
+        key: str,
+        places: list[dict[str, Any]],
+        user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
-        """Offer the stops or stations just found in a searchable dropdown."""
+        """Offer the stops or stations just found in a searchable dropdown.
+
+        ``custom_value`` is what makes Home Assistant render a picker that
+        filters as you type; it also accepts free text, so a value that is not
+        one of the places is sent back with an error. That picker shows the
+        raw value once an entry is picked, so the value is the label itself.
+        """
         options = [
-            SelectOptionDict(
-                value=place["id"],
-                label=(
-                    f"{place['name']} ({place['distance']} m)"
-                    if "distance" in place
-                    else place["name"]
-                ),
-            )
-            for place in places
+            SelectOptionDict(value=label, label=label) for label in _labels(places)
         ]
         return self.async_show_form(
             step_id=step_id,
@@ -260,10 +271,12 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         SelectSelectorConfig(
                             options=options,
                             mode=SelectSelectorMode.DROPDOWN,
+                            custom_value=True,
                         )
                     ),
                 }
             ),
+            errors={"base": "not_in_list"} if user_input is not None else None,
         )
 
     async def _async_save(
@@ -324,3 +337,31 @@ class NaolibOptionsFlow(OptionsFlow):
                 }
             ),
         )
+
+
+def _labels(places: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Give each place a unique label, in order: "Name (120 m)" or "Name".
+
+    A few stops share a name, so those labels get the stop number appended.
+    """
+    bases = [
+        f"{place['name']} ({place['distance']} m)"
+        if "distance" in place
+        else place["name"]
+        for place in places
+    ]
+    counts = Counter(bases)
+    return {
+        (
+            f"{base}, n°{place['id'].rsplit(':', 1)[-1]}" if counts[base] > 1 else base
+        ): place
+        for base, place in zip(bases, places, strict=True)
+    }
+
+
+def _find(places: list[dict[str, Any]], value: str) -> dict[str, Any] | None:
+    """Return the offered place picked by its label (or its id), if any."""
+    by_label = _labels(places)
+    if value in by_label:
+        return by_label[value]
+    return next((place for place in places if place["id"] == value), None)

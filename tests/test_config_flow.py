@@ -420,3 +420,80 @@ async def test_reconfigure_of_a_legacy_stop_stays_on_the_stop_branch(
     result = await entry.start_reconfigure_flow(hass)
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "stop"
+
+
+async def test_options_show_labels_as_values(hass: HomeAssistant) -> None:
+    """The picker shows the raw value once picked, so values are the labels."""
+    result = await _start(hass)
+    result = await _search(hass, result["flow_id"], _STOPS)
+
+    selector = next(iter(result["data_schema"].schema.values()))
+    assert [option["value"] for option in selector.config["options"]] == [
+        "Commerce (42 m)",
+        "Bouffay (300 m)",
+    ]
+    assert all(
+        option["value"] == option["label"] for option in selector.config["options"]
+    )
+
+
+async def test_homonym_stops_get_their_number(hass: HomeAssistant) -> None:
+    """Stops sharing a name are told apart by their number."""
+    homonyms = [
+        {"id": "FR_NAOLIB:StopPlace:152", "name": "Pinier", "quays": ["Q1"]},
+        {"id": "FR_NAOLIB:StopPlace:1076", "name": "Pinier", "quays": ["Q2"]},
+    ]
+    with patch(
+        "custom_components.naolib.config_flow.load_stops", return_value=homonyms
+    ):
+        result = await _menu(hass, "stop", "by_list")
+
+    selector = next(iter(result["data_schema"].schema.values()))
+    assert [option["value"] for option in selector.config["options"]] == [
+        "Pinier, n°152",
+        "Pinier, n°1076",
+    ]
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_STOP_CODE: "Pinier, n°1076"}
+    )
+    assert result["data"][CONF_STOP_CODE] == "FR_NAOLIB:StopPlace:1076"
+
+
+async def test_the_selection_list_is_searchable(hass: HomeAssistant) -> None:
+    """``custom_value`` makes the frontend render a type-to-filter picker."""
+    result = await _start(hass)
+    result = await _search(hass, result["flow_id"], _STOPS)
+
+    selector = next(iter(result["data_schema"].schema.values()))
+    assert selector.config["custom_value"] is True
+
+
+async def test_typed_text_must_match_a_stop(hass: HomeAssistant) -> None:
+    """Free text that is not one of the stops is sent back with an error."""
+    result = await _start(hass)
+    result = await _search(hass, result["flow_id"], _STOPS)
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_STOP_CODE: "Ai"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "select_stop"
+    assert result["errors"] == {"base": "not_in_list"}
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_STOP_CODE: "STOP2"}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_typed_text_must_match_a_station(hass: HomeAssistant) -> None:
+    """Free text that is not one of the stations is sent back with an error."""
+    with _patch_stations(_STATIONS):
+        result = await _menu(hass, "bike", "bike_by_list")
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_STATION_ID: "nowhere"}
+    )
+    assert result["step_id"] == "select_station"
+    assert result["errors"] == {"base": "not_in_list"}
