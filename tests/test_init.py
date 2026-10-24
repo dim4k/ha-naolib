@@ -6,6 +6,11 @@ from unittest.mock import patch
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_registry as er,
+    issue_registry as ir,
+)
 from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -455,3 +460,121 @@ async def test_bike_diagnostics(hass: HomeAssistant) -> None:
     assert diagnostics["coordinator"]["indexed_stations"] == 2
     assert diagnostics["coordinator"]["total_bikes_available"] == 7
     assert diagnostics["coordinator"]["total_docks_available"] == 46
+
+
+def _identifiers(hass: HomeAssistant, entry: MockConfigEntry) -> set[tuple[str, str]]:
+    """Return the device identifiers attached to an entry."""
+    return {
+        identifier
+        for device in dr.async_entries_for_config_entry(
+            dr.async_get(hass), entry.entry_id
+        )
+        for identifier in device.identifiers
+    }
+
+
+async def test_reconfiguring_a_stop_drops_its_old_device(hass: HomeAssistant) -> None:
+    """Moving an entry to another stop removes the previous device and entity."""
+    entry = _entry("STOP1")
+    await _setup(hass, entry)
+    assert _identifiers(hass, entry) == {(DOMAIN, "STOP1")}
+
+    hass.config_entries.async_update_entry(
+        entry,
+        unique_id="STOP2",
+        data={CONF_STOP_CODE: "STOP2", CONF_STOP_LABEL: "B", CONF_QUAYS: ["QUAY2"]},
+    )
+    with (
+        patch(
+            "custom_components.naolib.coordinator.NaolibApiClient"
+            ".async_get_all_departures",
+            return_value=_network("QUAY2"),
+        ),
+        patch("custom_components.naolib.coordinator.last_departures", return_value={}),
+    ):
+        await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert _identifiers(hass, entry) == {(DOMAIN, "STOP2")}
+    unique_ids = {
+        entity.unique_id
+        for entity in er.async_entries_for_config_entry(
+            er.async_get(hass), entry.entry_id
+        )
+    }
+    assert unique_ids == {"naolib_STOP2_next"}
+
+
+async def test_reconfiguring_a_station_drops_its_old_device(
+    hass: HomeAssistant,
+) -> None:
+    """Moving a bike entry to another station removes the previous device."""
+    entry = _bike_entry("1")
+    await _setup_bike(hass, entry)
+    assert _identifiers(hass, entry) == {(DOMAIN, "bike_1")}
+
+    hass.config_entries.async_update_entry(
+        entry,
+        unique_id="bike_2",
+        data={
+            CONF_ENTRY_TYPE: ENTRY_TYPE_BIKE,
+            CONF_STATION_ID: "2",
+            CONF_STATION_LABEL: "Station 2",
+        },
+    )
+    with patch(
+        "custom_components.naolib.bike.NaolibBikeCoordinator._async_update_data",
+        return_value=_BIKE_NETWORK,
+    ):
+        await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert _identifiers(hass, entry) == {(DOMAIN, "bike_2")}
+
+
+async def test_stop_without_quays_raises_a_repair_issue(hass: HomeAssistant) -> None:
+    """A legacy stop with no quays is surfaced in Repairs until it is fixed."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="STOP1",
+        title="Arrêt STOP1",
+        data={CONF_STOP_CODE: "STOP1", CONF_STOP_LABEL: "A", CONF_QUAYS: []},
+    )
+    await _setup(hass, entry)
+
+    issue_id = f"missing_quays_{entry.entry_id}"
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_placeholders == {"stop": "Arrêt STOP1"}
+
+    # Re-adding the quays clears the issue on the next setup.
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_QUAYS: ["QUAY1"]}
+    )
+    with (
+        patch(
+            "custom_components.naolib.coordinator.NaolibApiClient"
+            ".async_get_all_departures",
+            return_value=_network(),
+        ),
+        patch("custom_components.naolib.coordinator.last_departures", return_value={}),
+    ):
+        await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_removing_an_entry_clears_its_repair_issue(hass: HomeAssistant) -> None:
+    """Deleting a stop that had no quays also deletes its repair issue."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="STOP1",
+        data={CONF_STOP_CODE: "STOP1", CONF_STOP_LABEL: "A", CONF_QUAYS: []},
+    )
+    await _setup(hass, entry)
+    issue_id = f"missing_quays_{entry.entry_id}"
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+
+    assert await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None

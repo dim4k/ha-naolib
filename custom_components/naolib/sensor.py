@@ -73,7 +73,6 @@ class NaolibNextDeparturesSensor(
         super().__init__(coordinator)
         self._stop = stop
         self._attr_unique_id = f"naolib_{stop.code}_next"
-        self._attr_icon = "mdi:bus-clock"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, stop.code)},
             name=f"Arrêt {stop.name}",
@@ -91,7 +90,8 @@ class NaolibNextDeparturesSensor(
     @property
     def native_value(self) -> datetime | None:
         """Return the timestamp of the very next bus, or None if none."""
-        return self._stop_data["next_departure_dt"]
+        next_departure: datetime | None = self._stop_data["next_departure_dt"]
+        return next_departure
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -145,7 +145,6 @@ class NaolibBikesAvailableSensor(NaolibBikeStationSensor):
     """Number of bikes ready to rent at the station."""
 
     _attr_translation_key = "bikes_available"
-    _attr_icon = "mdi:bike"
 
     # Rebuilt on every poll and only useful to the card; keeping it out of the
     # recorder avoids bloating the database.
@@ -189,7 +188,6 @@ class NaolibDocksAvailableSensor(NaolibBikeStationSensor):
     """Number of free docks at the station."""
 
     _attr_translation_key = "docks_available"
-    _attr_icon = "mdi:rhombus-outline"
     _attr_native_unit_of_measurement = "places"
 
     def __init__(

@@ -54,3 +54,15 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 # The integration is imported as `custom_components.naolib` from the repo root.
 pythonpath = ["."]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["custom_components/naolib"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Home Assistant re-exports helpers from its package roots without aliases
+# (e.g. websocket_api.websocket_command, http.StaticPathConfig).
+module = "homeassistant.*"
+implicit_reexport = true
