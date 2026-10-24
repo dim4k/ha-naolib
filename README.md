@@ -60,6 +60,9 @@ removed by hand.
 Both cards are registered by the integration, so they show up in the card picker, and every
 option below is also available from their visual editor.
 
+When adding a card **by entity** (Home Assistant 2026.9 or newer), picking a Naolib stop or bike
+sensor also suggests the matching card under **Community**.
+
 ### Departures — `custom:naolib-card`
 
 ```yaml
