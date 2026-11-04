@@ -6,8 +6,7 @@ from typing import Any
 
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsFlow
-from homeassistant.core import callback
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.selector import (
     LocationSelector,
     NumberSelector,
@@ -20,9 +19,11 @@ from homeassistant.helpers.selector import (
 )
 import voluptuous as vol
 
-from .bike import GbfsUnavailableError, async_fetch_stations
+from .bike import VOI_FEED, GbfsUnavailableError, async_fetch_stations, station_key
 from .const import (
     BIKE_ID_PREFIX,
+    BIKE_PROVIDER_VOI,
+    CONF_BIKE_PROVIDER,
     CONF_ENTRY_TYPE,
     CONF_LOCATION,
     CONF_QUAYS,
@@ -82,17 +83,7 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def _location_schema(self) -> vol.Schema:
         """Build the map form, centred on the home location."""
-        default_location = {
-            "latitude": self.hass.config.latitude,
-            "longitude": self.hass.config.longitude,
-        }
-        return vol.Schema(
-            {
-                vol.Required(
-                    CONF_LOCATION, default=default_location
-                ): LocationSelector(),
-            }
-        )
+        return location_schema(self.hass.config.latitude, self.hass.config.longitude)
 
     async def async_step_by_list(
         self, user_input: dict[str, Any] | None = None
@@ -125,19 +116,11 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors={"base": "no_stops_found"},
         )
 
-    async def _async_fetch_stations(self) -> list[dict[str, Any]] | None:
-        """Read the live station list, or None when the feed is unreachable."""
-        try:
-            return await async_fetch_stations(async_get_clientsession(self.hass))
-        except GbfsUnavailableError:
-            _LOGGER.warning("The Naolib GBFS feed could not be reached")
-            return None
-
     async def async_step_bike_by_list(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Offer every bike station in one searchable dropdown."""
-        stations = await self._async_fetch_stations()
+        stations = await async_fetch_voi_stations(self.hass)
         if stations is None:
             return self.async_abort(reason="cannot_connect")
         if not stations:
@@ -158,7 +141,7 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         location = user_input[CONF_LOCATION]
         errors: dict[str, str] = {}
-        stations = await self._async_fetch_stations()
+        stations = await async_fetch_voi_stations(self.hass)
         if stations is None:
             errors["base"] = "cannot_connect"
         else:
@@ -180,23 +163,14 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         station = (
             None
             if user_input is None
-            else _find(self._stations, user_input[CONF_STATION_ID])
+            else find_place(self._stations, user_input[CONF_STATION_ID])
         )
         if station is None:
             return self._show_selection(
                 "select_station", CONF_STATION_ID, self._stations, user_input
             )
 
-        station_id = station["id"]
-        return await self._async_save(
-            unique_id=f"{BIKE_ID_PREFIX}{station_id}",
-            title=f"Station vélo : {station['name']}",
-            data={
-                CONF_ENTRY_TYPE: ENTRY_TYPE_BIKE,
-                CONF_STATION_ID: station_id,
-                CONF_STATION_LABEL: station["name"],
-            },
-        )
+        return await self._async_save(**voi_station_entry(station))
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
@@ -218,7 +192,7 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         stop = (
             None
             if user_input is None
-            else _find(self._stops, user_input[CONF_STOP_CODE])
+            else find_place(self._stops, user_input[CONF_STOP_CODE])
         )
         if stop is None:
             return self._show_selection(
@@ -251,22 +225,9 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         one of the places is sent back with an error. That picker shows the
         raw value once an entry is picked, so the value is the label itself.
         """
-        options = [
-            SelectOptionDict(value=label, label=label) for label in _labels(places)
-        ]
         return self.async_show_form(
             step_id=step_id,
-            data_schema=vol.Schema(
-                {
-                    vol.Required(key): SelectSelector(
-                        SelectSelectorConfig(
-                            options=options,
-                            mode=SelectSelectorMode.DROPDOWN,
-                            custom_value=True,
-                        )
-                    ),
-                }
-            ),
+            data_schema=selection_schema(key, places),
             errors={"base": "not_in_list"} if user_input is not None else None,
         )
 
@@ -330,7 +291,62 @@ class NaolibOptionsFlow(OptionsFlow):
         )
 
 
-def _labels(places: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def location_schema(latitude: float, longitude: float) -> vol.Schema:
+    """Build a map form, centred on a location."""
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_LOCATION, default={"latitude": latitude, "longitude": longitude}
+            ): LocationSelector(),
+        }
+    )
+
+
+def selection_schema(key: str, places: list[dict[str, Any]]) -> vol.Schema:
+    """Build a searchable dropdown of stops or stations, keyed by their label."""
+    options = [
+        SelectOptionDict(value=label, label=label) for label in place_labels(places)
+    ]
+    return vol.Schema(
+        {
+            vol.Required(key): SelectSelector(
+                SelectSelectorConfig(
+                    options=options,
+                    mode=SelectSelectorMode.DROPDOWN,
+                    custom_value=True,
+                )
+            ),
+        }
+    )
+
+
+async def async_fetch_voi_stations(hass: HomeAssistant) -> list[dict[str, Any]] | None:
+    """Read the Voi spots, or None when the feed is unreachable.
+
+    New stations are always Voi spots: the JCDecaux network is being dismantled.
+    """
+    try:
+        return await async_fetch_stations(hass, VOI_FEED)
+    except GbfsUnavailableError:
+        _LOGGER.warning("The Voi GBFS feed could not be reached")
+        return None
+
+
+def voi_station_entry(station: dict[str, Any]) -> dict[str, Any]:
+    """Return the unique id, title and data of an entry tracking a Voi spot."""
+    return {
+        "unique_id": f"{BIKE_ID_PREFIX}{station_key(BIKE_PROVIDER_VOI, station['id'])}",
+        "title": f"Station vélo : {station['name']}",
+        "data": {
+            CONF_ENTRY_TYPE: ENTRY_TYPE_BIKE,
+            CONF_BIKE_PROVIDER: BIKE_PROVIDER_VOI,
+            CONF_STATION_ID: station["id"],
+            CONF_STATION_LABEL: station["name"],
+        },
+    }
+
+
+def place_labels(places: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Give each place a unique label, in order: "Name (120 m)" or "Name".
 
     A few stops share a name, so those labels get the stop number appended.
@@ -350,9 +366,9 @@ def _labels(places: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     }
 
 
-def _find(places: list[dict[str, Any]], value: str) -> dict[str, Any] | None:
+def find_place(places: list[dict[str, Any]], value: str) -> dict[str, Any] | None:
     """Return the offered place picked by its label (or its id), if any."""
-    by_label = _labels(places)
+    by_label = place_labels(places)
     if value in by_label:
         return by_label[value]
     return next((place for place in places if place["id"] == value), None)

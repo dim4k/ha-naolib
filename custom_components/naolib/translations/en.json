@@ -19,7 +19,7 @@
             },
             "bike": {
                 "title": "Bike station selection",
-                "description": "How do you want to pick the station?",
+                "description": "How do you want to pick the station? Bike sharing is now operated by Voi: its electric bikes park on spots marked on the ground.",
                 "menu_options": {
                     "bike_by_list": "Pick from the list",
                     "bike_by_location": "Search around a location"
@@ -62,19 +62,19 @@
                     "station_id": "Station"
                 },
                 "data_description": {
-                    "station_id": "Type a few letters to filter the list. The distance is shown when searching from the map."
+                    "station_id": "Type a few letters to filter the list. Voi spots are named after their closest stop and their area. The distance is shown when searching from the map."
                 }
             }
         },
         "error": {
             "no_stops_found": "No matching stop found.",
             "no_stations_found": "No matching bike station found.",
-            "cannot_connect": "Could not reach the Naolib bike service.",
+            "cannot_connect": "Could not reach the Voi bike service.",
             "not_in_list": "Pick an entry from the list."
         },
         "abort": {
             "already_configured": "This stop or station is already configured.",
-            "cannot_connect": "Could not reach the Naolib bike service.",
+            "cannot_connect": "Could not reach the Voi bike service.",
             "no_stops_found": "No stop available.",
             "no_stations_found": "No bike station available.",
             "reconfigure_successful": "Configuration updated successfully."
@@ -112,6 +112,9 @@
             },
             "docks_available": {
                 "name": "Docks available"
+            },
+            "best_range": {
+                "name": "Best range"
             }
         }
     },
@@ -158,6 +161,36 @@
         "missing_quays": {
             "title": "Stop {stop} must be re-added",
             "description": "The stop {stop} was configured before the Naolib stop identifiers changed, so it has no quays and cannot show any departure. Delete this entry and add the stop again."
+        },
+        "bike_station_retired": {
+            "title": "The bike station {station} was retired",
+            "fix_flow": {
+                "step": {
+                    "location": {
+                        "title": "Replace {station}",
+                        "description": "The Naolib Vélo stations (ex-Bicloo) are replaced by Voi electric bikes, and {station} is no longer in service. Pick where to look for a Voi spot: the map starts at the old station when its position is known. The entry keeps its \"Bikes available\" entity; the \"Docks available\" one is removed, since Voi spots have no docks.",
+                        "data": {
+                            "location": "Location"
+                        }
+                    },
+                    "select": {
+                        "title": "Voi spot",
+                        "description": "Select the Voi spot that replaces the station.",
+                        "data": {
+                            "station_id": "Voi spot"
+                        }
+                    }
+                },
+                "error": {
+                    "cannot_connect": "Could not reach the Voi bike service.",
+                    "no_stations_found": "No Voi spot found around this location.",
+                    "not_in_list": "Pick an entry from the list."
+                },
+                "abort": {
+                    "entry_removed": "This station is no longer configured.",
+                    "already_configured": "This Voi spot is already tracked by another entry."
+                }
+            }
         }
     }
 }

@@ -15,8 +15,12 @@ from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.naolib.bike import retired_issue_id
 from custom_components.naolib.const import (
     ATTR_CONFIG_ENTRY_ID,
+    BIKE_PROVIDER_JCDECAUX,
+    BIKE_PROVIDER_VOI,
+    CONF_BIKE_PROVIDER,
     CONF_ENTRY_TYPE,
     CONF_QUAYS,
     CONF_STATION_ID,
@@ -367,11 +371,13 @@ def _bike_entry(station_id: str = "1") -> MockConfigEntry:
     )
 
 
-async def _setup_bike(hass: HomeAssistant, entry: MockConfigEntry) -> None:
+async def _setup_bike(
+    hass: HomeAssistant, entry: MockConfigEntry, network: dict | None = None
+) -> None:
     entry.add_to_hass(hass)
     with patch(
         "custom_components.naolib.bike.NaolibBikeCoordinator._async_update_data",
-        return_value=_BIKE_NETWORK,
+        return_value=network or _BIKE_NETWORK,
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -383,7 +389,8 @@ async def test_bike_setup_and_unload(hass: HomeAssistant) -> None:
     await _setup_bike(hass, entry)
 
     assert entry.state is ConfigEntryState.LOADED
-    coordinator = hass.data[DOMAIN].bikes
+    coordinator = hass.data[DOMAIN].bikes[BIKE_PROVIDER_JCDECAUX]
+    assert entry.runtime_data is coordinator
     assert coordinator.tracked[entry.entry_id].id == "1"
     device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, "bike_1")})
     assert device is not None
@@ -467,6 +474,177 @@ async def test_bike_diagnostics(hass: HomeAssistant) -> None:
     assert diagnostics["coordinator"]["indexed_stations"] == 2
     assert diagnostics["coordinator"]["total_bikes_available"] == 7
     assert diagnostics["coordinator"]["total_docks_available"] == 46
+    assert diagnostics["coordinator"]["provider"] == BIKE_PROVIDER_JCDECAUX
+
+
+_VOI_NETWORK = {
+    "v1": {
+        "id": "v1",
+        "name": "Hôtel de Ville · Centre-ville 064",
+        "code": "NAN_CEN_064",
+        "lat": 47.217193,
+        "lon": -1.554497,
+        "address": "",
+        "capacity": 8,
+        "bikes": 2,
+        "docks": None,
+        "is_installed": True,
+        "is_renting": True,
+        "is_returning": True,
+        "last_reported": "2026-11-04T10:28:50+00:00",
+        "vehicles": [
+            {"range_km": 45, "disabled": False},
+            {"range_km": 12, "disabled": False},
+        ],
+    },
+    "v2": {
+        "id": "v2",
+        "name": "Hôtel de Ville · Centre-ville 065",
+        "code": "NAN_CEN_065",
+        "lat": 47.2180,
+        "lon": -1.5540,
+        "address": "",
+        "capacity": 6,
+        "bikes": 0,
+        "docks": None,
+        "is_installed": True,
+        "is_renting": True,
+        "is_returning": True,
+        "last_reported": "2026-11-04T10:28:50+00:00",
+        "vehicles": [],
+    },
+}
+
+
+def _voi_entry(station_id: str = "v1") -> MockConfigEntry:
+    return MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=f"bike_voi_{station_id}",
+        title=f"Station vélo : {station_id}",
+        data={
+            CONF_ENTRY_TYPE: ENTRY_TYPE_BIKE,
+            CONF_BIKE_PROVIDER: BIKE_PROVIDER_VOI,
+            CONF_STATION_ID: station_id,
+            CONF_STATION_LABEL: f"Spot {station_id}",
+        },
+    )
+
+
+async def test_voi_spot_reports_the_range_instead_of_the_docks(
+    hass: HomeAssistant,
+) -> None:
+    """A Voi spot has no dock to count, but every bike reports its range."""
+    entry = _voi_entry()
+    await _setup_bike(hass, entry, _VOI_NETWORK)
+
+    assert entry.runtime_data is hass.data[DOMAIN].bikes[BIKE_PROVIDER_VOI]
+    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, "bike_voi_v1")})
+    assert device is not None
+    assert device.manufacturer == "Voi"
+
+    unique_ids = {
+        entity.unique_id
+        for entity in er.async_entries_for_config_entry(
+            er.async_get(hass), entry.entry_id
+        )
+    }
+    assert unique_ids == {"naolib_bike_voi_v1_bikes", "naolib_bike_voi_v1_range"}
+
+    states = [
+        state
+        for state in hass.states.async_all("sensor")
+        if state.attributes.get("station_id") == "v1"
+    ]
+    bikes = next(state for state in states if "nearby_stations" in state.attributes)
+    assert bikes.state == "2"
+    assert bikes.attributes["attribution"] == "Données Voi"
+    assert bikes.attributes["provider"] == BIKE_PROVIDER_VOI
+    assert bikes.attributes["station_code"] == "NAN_CEN_064"
+    assert bikes.attributes["docks_available"] is None
+    assert bikes.attributes["best_range_km"] == 45
+    assert bikes.attributes["app_url"] == "voiapp://closest_vehicle"
+    assert bikes.attributes["nearby_stations"][0]["best_range_km"] is None
+
+    best_range = next(
+        state for state in states if "nearby_stations" not in state.attributes
+    )
+    assert best_range.state == "45"
+    assert best_range.attributes["unit_of_measurement"] == "km"
+
+
+async def test_each_operator_has_its_own_coordinator(hass: HomeAssistant) -> None:
+    """A JCDecaux station and a Voi spot are not polled by the same coordinator."""
+    jcdecaux = _bike_entry("1")
+    voi = _voi_entry()
+    await _setup_bike(hass, jcdecaux)
+    await _setup_bike(hass, voi, _VOI_NETWORK)
+
+    assert jcdecaux.runtime_data is not voi.runtime_data
+    assert jcdecaux.runtime_data.feed.key == BIKE_PROVIDER_JCDECAUX
+    assert voi.runtime_data.feed.key == BIKE_PROVIDER_VOI
+
+
+async def test_voi_diagnostics(hass: HomeAssistant) -> None:
+    """Diagnostics count the bikes placed on the spots."""
+    entry = _voi_entry()
+    await _setup_bike(hass, entry, _VOI_NETWORK)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["coordinator"]["provider"] == BIKE_PROVIDER_VOI
+    assert diagnostics["coordinator"]["total_vehicles_placed"] == 2
+    assert diagnostics["coordinator"]["total_docks_available"] == 0
+
+
+def _retired_issue(hass: HomeAssistant, entry: MockConfigEntry) -> str:
+    """Raise the repair of a retired station for an entry; return its id."""
+    issue_id = retired_issue_id(entry.entry_id)
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        issue_id,
+        is_fixable=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="bike_station_retired",
+        translation_placeholders={"station": entry.title},
+        data={"entry_id": entry.entry_id},
+    )
+    return issue_id
+
+
+async def test_an_entry_moved_to_voi_drops_its_retired_issue(
+    hass: HomeAssistant,
+) -> None:
+    """Once an entry reads Voi, its station can no longer be retired."""
+    entry = _voi_entry()
+    issue_id = _retired_issue(hass, entry)
+
+    await _setup_bike(hass, entry, _VOI_NETWORK)
+
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_a_jcdecaux_entry_keeps_its_retired_issue(hass: HomeAssistant) -> None:
+    """Setting a retired station up again does not hide its repair."""
+    entry = _bike_entry("1")
+    issue_id = _retired_issue(hass, entry)
+
+    await _setup_bike(hass, entry)
+
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+
+
+async def test_removing_a_station_clears_its_retired_issue(
+    hass: HomeAssistant,
+) -> None:
+    """Deleting a retired station also deletes its repair."""
+    entry = _bike_entry("1")
+    await _setup_bike(hass, entry)
+    issue_id = _retired_issue(hass, entry)
+
+    assert await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
 
 
 def _identifiers(hass: HomeAssistant, entry: MockConfigEntry) -> set[tuple[str, str]]:

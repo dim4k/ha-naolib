@@ -20,15 +20,16 @@
 ![Naolib cards](https://github.com/dim4k/ha-naolib/blob/main/screenshot.png?raw=true)
 
 <p align="center">
-  <sub>Unofficial project, not affiliated with Semitan, Nantes Métropole, Okina or JCDecaux.</sub>
+  <sub>Unofficial project, not affiliated with Semitan, Nantes Métropole, Okina, JCDecaux or Voi.</sub>
 </p>
 
 ## Features
 
 - **Real-time departures** from the official SIRI feed, with a ticking countdown, a delay
   indicator and the last departure of the day flagged per line.
-- **Bike stations** (ex-Bicloo) with bikes and docks available, plus the neighbouring stations
-  when yours is empty or full.
+- **Bike stations**: the Voi electric bikes with the range left in each one, plus the
+  neighbouring spots when yours is empty. The former Naolib Vélo stations (ex-Bicloo) keep
+  working until they are dismantled, then a repair moves them to a nearby Voi spot.
 - **Full daily timetable** fetched on demand from the card, for today and the six days ahead.
 - **Guided setup** from a searchable list or a map, and **sensor entities** carrying every
   upcoming departure for your automations.
@@ -39,7 +40,8 @@
   tablet, with a ticking countdown and the delay of each vehicle.
 - **Get told when to leave**: an automation calls `naolib.get_departures` with your walking
   time and notifies you when the next reachable bus is due (see [Automations](#automations)).
-- **Pick bus or bike**: check how many bikes and free docks a station has before heading out.
+- **Pick bus or bike**: check how many bikes a spot has, and how far they can take you,
+  before heading out.
 
 ## Installation
 
@@ -57,6 +59,7 @@ install, copy `custom_components/naolib` into `config/custom_components` and res
 Add the **Naolib** integration, choose what to track — **a stop** (bus, tram, ferry) or **a
 bike station** — then pick it from the list of the whole network (type a few letters to filter
 it), or on a map around a location (your home coordinates are pre-filled, distances included).
+New bike stations are always Voi spots: the Naolib Vélo network is being dismantled.
 
 Entities are created right away; repeat to follow several stops or stations. The refresh
 interval (60 s by default, 30 to 600 s) is set from the **Configure** button. Deleting an
@@ -123,8 +126,11 @@ type: custom:naolib-bike-card
 entity: sensor.<your_station>_bikes_available
 ```
 
-Shows the bikes and docks available, a gauge of how full the station is, a warning when
-renting or returning is suspended, and the neighbouring stations with their distance.
+Shows the bikes available, a gauge of how full the station is, a warning when renting or
+returning is suspended, and the neighbouring stations with their distance. On a Voi spot, the
+free docks give way to the best range, the range of each parked bike is listed (amber under
+15 km, red under 5 km, struck through when out of order), and a link opens the Voi app. On a
+former Naolib Vélo station, the free docks are shown instead.
 
 | Option          | Default | Description                                        |
 | --------------- | ------- | -------------------------------------------------- |
@@ -132,8 +138,8 @@ renting or returning is suspended, and the neighbouring stations with their dist
 | `title`         | station | Override the card title                            |
 | `nearby_count`  | `3`     | Neighbouring stations listed, `0` to hide them     |
 | `nearby_radius` | `500`   | Only list the stations within this many meters     |
-| `show_docks`    | `true`  | Show the free docks next to the bikes              |
-| `compact`       | `false` | Hide the fill gauge                                |
+| `show_docks`    | `true`  | Show the free docks (Naolib Vélo stations only)    |
+| `compact`       | `false` | Hide the gauge, the bike ranges and the app link   |
 
 ## Entities
 
@@ -143,20 +149,37 @@ upcoming departures, each with `line`, `type` (`1` tram, `2` busway, `3` bus, `4
 `destination`, `direction`, `time` (`proche`, `4 mn`…), `expected_ts`, `delay_minutes` and
 `is_last`. `stop_code` and `stop_label` identify the stop.
 
-**A bike station** creates two sensors, **Bikes available** and **Docks available**. The first
-carries the station details:
+**A Voi spot** creates two sensors, **Bikes available** and **Best range** (the longest range
+among the bikes that can be rented there, in km). **A former Naolib Vélo station** creates
+**Bikes available** and **Docks available**. The **Bikes available** sensor carries the
+station details:
 
-| Attribute         | Description                                                    |
-| ----------------- | -------------------------------------------------------------- |
-| `station_id`      | Station identifier on the network                              |
-| `station_label`   | Station name as shown in the UI                                |
-| `address`         | Street address of the station                                  |
-| `capacity`        | Total number of docks                                          |
-| `docks_available` | Free docks, mirrored from the second sensor                    |
-| `is_renting`      | `false` when no bike can be taken out                          |
-| `is_returning`    | `false` when no bike can be given back                         |
-| `last_reported`   | Operator timestamp. Unreliable, so it is not shown on the card |
-| `nearby_stations` | Neighbouring stations with their distance and counters         |
+| Attribute         | Description                                                         |
+| ----------------- | ------------------------------------------------------------------- |
+| `station_id`      | Station identifier on the network                                   |
+| `station_label`   | Station name as shown in the UI                                     |
+| `station_code`    | Voi's own code for the spot (`NAN_CEN_064`), `null` for Naolib Vélo |
+| `provider`        | `voi`, or `jcdecaux` for a former Naolib Vélo station               |
+| `address`         | Street address (Naolib Vélo only)                                   |
+| `capacity`        | Number of docks, or the indicative size of a Voi spot               |
+| `docks_available` | Free docks, mirrored from the second sensor (`null` on a Voi spot)  |
+| `best_range_km`   | Longest range among the bikes that can be rented                    |
+| `vehicles`        | Each bike parked at the spot: `range_km` and `disabled`, best first |
+| `is_renting`      | `false` when no bike can be taken out                               |
+| `is_returning`    | `false` when no bike can be given back                              |
+| `last_reported`   | Operator timestamp. Unreliable, so it is not shown on the card      |
+| `app_url`         | Link opening the operator's app on the closest bike                 |
+| `nearby_stations` | Neighbouring stations with their distance, counters and best range  |
+
+### From Naolib Vélo to Voi
+
+From October 2026 the Naolib Vélo stations (ex-Bicloo) are removed one town at a time and
+replaced by Voi electric bikes, until January 2027. A station you track keeps working until
+it is gone. Once it has been missing from the JCDecaux feed for a few polls (or the whole feed
+has been down for a day), **Settings → Repairs** offers to replace it: pick a location (the
+map starts where the old station stood), then one of the Voi spots around it. The entry moves
+over and keeps its **Bikes available** entity, so the cards and automations built on it keep
+working. **Docks available** is removed, since a Voi spot has no docks.
 
 ## Automations
 
@@ -177,9 +200,13 @@ The `next_departures` attribute works just as well in a template trigger, withou
 ## How it works
 
 - **One request for the whole network.** A single SIRI `StopMonitoring` call returns every
-  monitored stop, so watching ten stops costs no more than watching one. The bike feed works
+  monitored stop, so watching ten stops costs no more than watching one. The bike feeds work
   the same way: one GBFS poll serves every station, which is also what makes the
   "nearby stations" list free.
+- **Bikes are placed on their spot.** Voi lists every bike with its position and range; each
+  one within 30 m of a spot is counted there. Voi names its spots with internal codes, so
+  they are named after the closest Naolib stop and their area instead
+  (`NAN_CEN_064` becomes "Hôtel de Ville · Centre-ville 064").
 - **Timetables stay out of the database.** The daily schedule is served over WebSocket when
   the card asks for it, grouped by hour, and never stored as a state. The stop index and the
   timetables are generated from the Nantes Métropole GTFS feed and refreshed monthly by a
@@ -197,12 +224,17 @@ The `next_departures` attribute works just as well in a template trigger, withou
   come from the GTFS data embedded in the release; once its calendar runs out, the card shows
   the timetable as expired until the integration is updated.
 - **No vehicle positions**: the live feed gives departure times, not where the vehicles are.
+- **Voi spot names are inferred.** The areas behind the codes are deduced, not published by
+  Voi; an area not known yet is shown as its raw prefix (`HER 004`) next to the closest stop.
 
 ## Troubleshooting
 
 - **A stop never shows any departure**: if a *Repairs* issue says the stop must be re-added,
   it was configured before the Naolib stop identifiers changed — delete the entry and add the
   stop again. Otherwise there may simply be no vehicle due (night, end of service).
+- **"The bike station … was retired" in Repairs**: its Naolib Vélo station was removed.
+  Follow the repair to move the entry to a nearby Voi spot (see
+  [From Naolib Vélo to Voi](#from-naolib-vélo-to-voi)).
 - **"The Naolib API is unavailable" in the logs**: the upstream endpoint is down or rate
   limited; the last departures stay available and a message is logged when it comes back.
 - **A card is missing after an update**: reload the browser page without cache; the cards are
@@ -226,8 +258,10 @@ The `next_departures` attribute works just as well in a template trigger, withou
 ## Data sources
 
 Live departures come from the **Naolib / Okina SIRI** public endpoint, stops and timetables
-from the **Nantes Métropole** open data GTFS feed, and the bike stations from the **Naolib
-GBFS 3.0** feed operated by JCDecaux, referenced on
+from the **Nantes Métropole** open data GTFS feed, the Voi bikes from the **Voi GBFS 2.3**
+feed of Nantes, published by Voi on
+[transport.data.gouv.fr](https://transport.data.gouv.fr/datasets/gbfs-nantes), and the former
+Naolib Vélo stations from the **Naolib GBFS 3.0** feed operated by JCDecaux, referenced on
 [transport.data.gouv.fr](https://transport.data.gouv.fr/datasets/offre-et-temps-reel-du-service-velos-en-libre-service-naolib-de-nantes-metropole-au-format-gbfs).
 
 ## Development

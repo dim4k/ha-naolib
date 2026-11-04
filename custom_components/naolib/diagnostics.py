@@ -65,11 +65,15 @@ def _bike_snapshot(coordinator: NaolibBikeCoordinator) -> dict[str, Any]:
     """Report what the bike coordinator holds."""
     network = coordinator.data or {}
     return {
+        "provider": coordinator.feed.key,
         "indexed_stations": len(network),
         "total_bikes_available": sum(
             station["bikes"] or 0 for station in network.values()
         ),
         "total_docks_available": sum(
             station["docks"] or 0 for station in network.values()
+        ),
+        "total_vehicles_placed": sum(
+            len(station.get("vehicles") or ()) for station in network.values()
         ),
     }

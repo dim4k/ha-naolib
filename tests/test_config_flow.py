@@ -8,8 +8,10 @@ from homeassistant.data_entry_flow import FlowResultType
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.naolib.bike import GbfsUnavailableError
+from custom_components.naolib.bike import VOI_FEED, GbfsUnavailableError
 from custom_components.naolib.const import (
+    BIKE_PROVIDER_VOI,
+    CONF_BIKE_PROVIDER,
     CONF_ENTRY_TYPE,
     CONF_LOCATION,
     CONF_QUAYS,
@@ -221,16 +223,20 @@ async def test_options_flow_sets_the_update_interval(hass: HomeAssistant) -> Non
     assert entry.options == {CONF_UPDATE_INTERVAL: 120}
 
 
-def _bike_entry(station_id: str = "1") -> MockConfigEntry:
+def _bike_entry(station_id: str = "1", *, voi: bool = False) -> MockConfigEntry:
+    """Return a bike entry: a JCDecaux station by default, as before Voi."""
+    data = {
+        CONF_ENTRY_TYPE: ENTRY_TYPE_BIKE,
+        CONF_STATION_ID: station_id,
+        CONF_STATION_LABEL: station_id,
+    }
+    if voi:
+        data[CONF_BIKE_PROVIDER] = BIKE_PROVIDER_VOI
     return MockConfigEntry(
         domain=DOMAIN,
-        unique_id=f"bike_{station_id}",
+        unique_id=f"bike_voi_{station_id}" if voi else f"bike_{station_id}",
         title=f"Station vélo : {station_id}",
-        data={
-            CONF_ENTRY_TYPE: ENTRY_TYPE_BIKE,
-            CONF_STATION_ID: station_id,
-            CONF_STATION_LABEL: station_id,
-        },
+        data=data,
     )
 
 
@@ -244,15 +250,17 @@ def _patch_stations(stations: list | Exception):
 
 
 async def test_bike_flow_creates_the_entry(hass: HomeAssistant) -> None:
-    """Picking a location then a station creates a bike entry."""
+    """Picking a location then a Voi spot creates a bike entry."""
     result = await _menu(hass, "bike", "bike_by_location")
     assert result["step_id"] == "bike_by_location"
 
-    with _patch_stations(_STATIONS):
+    with _patch_stations(_STATIONS) as fetch:
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], _LOCATION
         )
     assert result["step_id"] == "select_station"
+    # New stations always come from Voi: JCDecaux is being dismantled.
+    assert fetch.call_args.args[1] is VOI_FEED
 
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_STATION_ID: "1"}
@@ -260,8 +268,10 @@ async def test_bike_flow_creates_the_entry(hass: HomeAssistant) -> None:
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Station vélo : PRÉFECTURE"
+    assert result["result"].unique_id == "bike_voi_1"
     assert result["data"] == {
         CONF_ENTRY_TYPE: ENTRY_TYPE_BIKE,
+        CONF_BIKE_PROVIDER: BIKE_PROVIDER_VOI,
         CONF_STATION_ID: "1",
         CONF_STATION_LABEL: "PRÉFECTURE",
     }
@@ -330,7 +340,7 @@ async def test_bike_feed_failure_is_reported(hass: HomeAssistant) -> None:
 
 async def test_already_configured_station(hass: HomeAssistant) -> None:
     """The same station cannot be added twice."""
-    _bike_entry("1").add_to_hass(hass)
+    _bike_entry("1", voi=True).add_to_hass(hass)
 
     result = await _menu(hass, "bike", "bike_by_location")
     with _patch_stations(_STATIONS):
@@ -346,7 +356,7 @@ async def test_already_configured_station(hass: HomeAssistant) -> None:
 
 
 async def test_reconfigure_keeps_the_entry_kind(hass: HomeAssistant) -> None:
-    """Reconfiguring a bike entry stays on the bike branch."""
+    """Reconfiguring a bike entry stays on the bike branch, and moves it to Voi."""
     entry = _bike_entry("1")
     entry.add_to_hass(hass)
 
@@ -368,7 +378,8 @@ async def test_reconfigure_keeps_the_entry_kind(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     assert entry.data[CONF_STATION_ID] == "2"
-    assert entry.unique_id == "bike_2"
+    assert entry.data[CONF_BIKE_PROVIDER] == BIKE_PROVIDER_VOI
+    assert entry.unique_id == "bike_voi_2"
 
 
 async def test_reconfigure_rejects_a_station_owned_by_another_entry(
@@ -377,7 +388,7 @@ async def test_reconfigure_rejects_a_station_owned_by_another_entry(
     """Two entries cannot end up on the same station."""
     entry = _bike_entry("1")
     entry.add_to_hass(hass)
-    _bike_entry("2").add_to_hass(hass)
+    _bike_entry("2", voi=True).add_to_hass(hass)
 
     result = await entry.start_reconfigure_flow(hass)
     result = await hass.config_entries.flow.async_configure(
