@@ -26,7 +26,13 @@ from homeassistant.loader import async_get_integration
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
-from .bike import NaolibBikeCoordinator, NaolibBikeStation
+from .bike import (
+    FEEDS,
+    NaolibBikeCoordinator,
+    NaolibBikeStation,
+    feed_of,
+    retired_issue_id,
+)
 from .const import (
     ATTR_CONFIG_ENTRY_ID,
     ATTR_DIRECTION,
@@ -96,7 +102,9 @@ class NaolibData:
     """State shared by every config entry, stored in ``hass.data``."""
 
     departures: NaolibDeparturesCoordinator
-    bikes: NaolibBikeCoordinator
+    # One per operator, keyed by provider. A coordinator only polls while an
+    # entity listens to it, so the idle one costs nothing.
+    bikes: dict[str, NaolibBikeCoordinator]
     loader_url: str = ""
 
 
@@ -115,7 +123,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     nothing here depends on the entry load/unload cycle.
     """
     hass.data[DOMAIN] = NaolibData(
-        NaolibDeparturesCoordinator(hass), NaolibBikeCoordinator(hass)
+        NaolibDeparturesCoordinator(hass),
+        {key: NaolibBikeCoordinator(hass, feed) for key, feed in FEEDS.items()},
     )
     websocket_api.async_register_command(hass, handle_timetable)
     websocket_api.async_register_command(hass, handle_around_subscribe)
@@ -216,8 +225,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> bo
     interval = int(entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
     coordinator: NaolibCoordinator
     if _is_bike(entry):
-        coordinator = data.bikes
-        device_id = _register_station(entry, coordinator, interval)
+        coordinator = data.bikes[feed_of(entry.data).key]
+        device_id = _register_station(hass, entry, coordinator, interval)
     else:
         coordinator = data.departures
         device_id = _register_stop(hass, entry, coordinator, interval)
@@ -286,23 +295,29 @@ def _register_stop(
 
 
 def _register_station(
-    entry: NaolibConfigEntry, coordinator: NaolibBikeCoordinator, interval: int
+    hass: HomeAssistant,
+    entry: NaolibConfigEntry,
+    coordinator: NaolibBikeCoordinator,
+    interval: int,
 ) -> str | None:
-    """Register a bike station on the bike coordinator; return its device id."""
+    """Register a bike station on its operator's coordinator; return its device id."""
     station_id = entry.data.get(CONF_STATION_ID)
     if not station_id:
         _LOGGER.error("Station id missing from configuration")
         return None
 
-    coordinator.register(
-        entry.entry_id,
-        NaolibBikeStation(
-            id=station_id,
-            name=entry.data.get(CONF_STATION_LABEL) or station_id,
-            interval=interval,
-        ),
+    # An entry moved off a retiring network no longer needs its repair.
+    if not coordinator.feed.retiring:
+        ir.async_delete_issue(hass, DOMAIN, retired_issue_id(entry.entry_id))
+
+    station = NaolibBikeStation(
+        id=station_id,
+        name=entry.data.get(CONF_STATION_LABEL) or station_id,
+        interval=interval,
+        provider=coordinator.feed.key,
     )
-    return f"{BIKE_ID_PREFIX}{station_id}"
+    coordinator.register(entry.entry_id, station)
+    return f"{BIKE_ID_PREFIX}{station.key}"
 
 
 def _remove_stale_devices(
@@ -441,5 +456,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> b
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: NaolibConfigEntry) -> None:
-    """Drop the repair issue of a deleted entry, if any."""
+    """Drop the repair issues of a deleted entry, if any."""
     ir.async_delete_issue(hass, DOMAIN, f"missing_quays_{entry.entry_id}")
+    ir.async_delete_issue(hass, DOMAIN, retired_issue_id(entry.entry_id))

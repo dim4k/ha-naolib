@@ -5,7 +5,7 @@ export const DEFAULT_BIKE_CONFIG = {
     title: "",
     nearby_count: 3, // neighbouring stations listed
     nearby_radius: 500, // meters
-    show_docks: true,
+    show_docks: true, // JCDecaux stations only: Voi spots have no docks
     compact: false,
 };
 

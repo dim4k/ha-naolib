@@ -9,6 +9,9 @@
             },
             "docks_available": {
                 "default": "mdi:rhombus-outline"
+            },
+            "best_range": {
+                "default": "mdi:battery-charging-high"
             }
         }
     },

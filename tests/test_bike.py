@@ -8,6 +8,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 import pytest
 
 from custom_components.naolib.bike import (
+    JCDECAUX_FEED,
     GbfsUnavailableError,
     NaolibBikeCoordinator,
     NaolibBikeStation,
@@ -207,7 +208,7 @@ async def test_async_fetch_stations_raises_when_unreachable(
         patch("custom_components.naolib.bike._async_get_json", return_value=None),
         pytest.raises(GbfsUnavailableError),
     ):
-        await async_fetch_stations(object())
+        await async_fetch_stations(hass, JCDECAUX_FEED)
 
 
 async def test_async_fetch_stations_returns_the_network(
@@ -216,7 +217,7 @@ async def test_async_fetch_stations_returns_the_network(
     """The whole station list is read from the live feed."""
     aioclient_mock.get(GBFS_STATION_INFORMATION_URL, json=_INFORMATION)
 
-    stations = await async_fetch_stations(async_get_clientsession(hass))
+    stations = await async_fetch_stations(hass, JCDECAUX_FEED)
 
     assert [station["id"] for station in stations] == ["1", "2", "3"]
 
@@ -275,7 +276,7 @@ def test_build_station_data_reports_a_missing_station() -> None:
 
 async def test_coordinator_merges_information_and_status(hass: HomeAssistant) -> None:
     """A poll indexes every station by id."""
-    coordinator = NaolibBikeCoordinator(hass)
+    coordinator = NaolibBikeCoordinator(hass, JCDECAUX_FEED)
 
     with patch(
         "custom_components.naolib.bike._async_get_json",
@@ -292,7 +293,7 @@ async def test_coordinator_caches_the_station_information(
     hass: HomeAssistant,
 ) -> None:
     """The descriptions are refetched at most once per TTL."""
-    coordinator = NaolibBikeCoordinator(hass)
+    coordinator = NaolibBikeCoordinator(hass, JCDECAUX_FEED)
 
     with patch(
         "custom_components.naolib.bike._async_get_json",
@@ -312,7 +313,7 @@ async def test_coordinator_keeps_the_last_snapshot_on_failure(
     hass: HomeAssistant,
 ) -> None:
     """A transient outage must not flag every station unavailable."""
-    coordinator = NaolibBikeCoordinator(hass)
+    coordinator = NaolibBikeCoordinator(hass, JCDECAUX_FEED)
 
     with patch(
         "custom_components.naolib.bike._async_get_json",
@@ -329,7 +330,7 @@ async def test_coordinator_keeps_the_last_snapshot_on_failure(
 
 async def test_coordinator_fails_when_it_never_succeeded(hass: HomeAssistant) -> None:
     """Without any snapshot to serve, the first failure is fatal."""
-    coordinator = NaolibBikeCoordinator(hass)
+    coordinator = NaolibBikeCoordinator(hass, JCDECAUX_FEED)
 
     with (
         patch("custom_components.naolib.bike._async_get_json", return_value=None),
@@ -340,7 +341,7 @@ async def test_coordinator_fails_when_it_never_succeeded(hass: HomeAssistant) ->
 
 async def test_coordinator_rejects_an_empty_station_list(hass: HomeAssistant) -> None:
     """A feed that describes no station leaves nothing to merge the counters into."""
-    coordinator = NaolibBikeCoordinator(hass)
+    coordinator = NaolibBikeCoordinator(hass, JCDECAUX_FEED)
 
     with (
         patch(
@@ -356,7 +357,7 @@ async def test_coordinator_rejects_statuses_of_unknown_stations(
     hass: HomeAssistant,
 ) -> None:
     """Counters that match no described station cannot be served."""
-    coordinator = NaolibBikeCoordinator(hass)
+    coordinator = NaolibBikeCoordinator(hass, JCDECAUX_FEED)
     orphan = {"data": {"stations": [{"station_id": "999"}]}}
 
     with (
@@ -371,7 +372,7 @@ async def test_coordinator_rejects_statuses_of_unknown_stations(
 
 async def test_coordinator_recovers_after_an_outage(hass: HomeAssistant) -> None:
     """Coming back up is logged once, like going down."""
-    coordinator = NaolibBikeCoordinator(hass)
+    coordinator = NaolibBikeCoordinator(hass, JCDECAUX_FEED)
 
     with patch(
         "custom_components.naolib.bike._async_get_json",
@@ -391,7 +392,7 @@ async def test_coordinator_recovers_after_an_outage(hass: HomeAssistant) -> None
 
 async def test_coordinator_uses_the_shortest_interval(hass: HomeAssistant) -> None:
     """Registered stations drive the polling interval."""
-    coordinator = NaolibBikeCoordinator(hass)
+    coordinator = NaolibBikeCoordinator(hass, JCDECAUX_FEED)
 
     coordinator.register("a", NaolibBikeStation(id="1", name="A", interval=120))
     coordinator.register("b", NaolibBikeStation(id="2", name="B", interval=30))

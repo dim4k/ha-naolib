@@ -19,6 +19,7 @@ const HELPERS = {
     title: "Laisser vide pour utiliser le nom de la station.",
     nearby_count: "Mettre à 0 pour masquer les stations voisines.",
     nearby_radius: "Les stations plus éloignées ne sont pas proposées.",
+    show_docks: "Sans effet sur les emplacements Voi, qui n'ont pas de bornes.",
     compact: "Masque la jauge de remplissage.",
 };
 

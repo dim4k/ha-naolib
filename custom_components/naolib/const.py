@@ -61,6 +61,12 @@ SIRI_URL: str = "https://api.okina.fr/gateway/sem/realtime/anshar/services/NAOLI
 SIRI_REQUESTOR_REF: str = "ha-naolib"
 SIRI_NAMESPACE: str = "http://www.siri.org.uk/siri"
 
+# A bike entry reads one of two operators. Entries created before Voi have no
+# provider and read JCDecaux, whose network is dismantled by January 2027.
+CONF_BIKE_PROVIDER: str = "provider"
+BIKE_PROVIDER_JCDECAUX: str = "jcdecaux"
+BIKE_PROVIDER_VOI: str = "voi"
+
 # Naolib bike-sharing (ex-Bicloo) GBFS 3.0 feeds, operated by JCDecaux under
 # the Cyclocity umbrella. Keyless, and referenced as the official source on
 # transport.data.gouv.fr.
@@ -68,8 +74,32 @@ GBFS_BASE_URL: str = "https://api.cyclocity.fr/contracts/nantes/gbfs/v3"
 GBFS_STATION_INFORMATION_URL: str = f"{GBFS_BASE_URL}/station_information.json"
 GBFS_STATION_STATUS_URL: str = f"{GBFS_BASE_URL}/station_status.json"
 
+# Voi electric bikes, which replace the JCDecaux network from October 2026.
+# Keyless GBFS 2.3 feed of the Nantes zone (421), published by Voi on
+# transport.data.gouv.fr. The UUID segment is shared by every French Voi city.
+VOI_GBFS_BASE_URL: str = (
+    "https://api.voiapp.io/gbfs/fr/6bb6b5dc-1cda-4da7-9216-d3023a0bc54a/v2/421"
+)
+VOI_STATION_INFORMATION_URL: str = f"{VOI_GBFS_BASE_URL}/station_information.json"
+VOI_STATION_STATUS_URL: str = f"{VOI_GBFS_BASE_URL}/station_status.json"
+VOI_FREE_BIKE_STATUS_URL: str = f"{VOI_GBFS_BASE_URL}/free_bike_status.json"
+# Opens the Voi app on the closest bike (advertised by system_information).
+VOI_APP_URL: str = "voiapp://closest_vehicle"
+
+# A Voi bike belongs to the spot it stands within this distance of: 99 % of
+# the parked bikes are within 30 m of a spot's centre.
+VOI_SPOT_RADIUS_M: int = 30
+# A Voi spot is named after the closest stop within this distance.
+VOI_LABEL_STOP_RADIUS_M: int = 200
+
 # The station list barely changes; the feed itself advertises a 1 hour TTL.
 GBFS_INFO_TTL: int = 3600
+
+# A JCDecaux station is reported as retired once it has been missing (or
+# uninstalled) for this many polls in a row, or once the whole feed has been
+# unreachable for this long.
+BIKE_RETIRED_AFTER_POLLS: int = 3
+BIKE_FEED_GONE_AFTER: int = 24 * 3600
 
 # Upper bounds for the nearby stations exposed as a sensor attribute. The card
 # narrows this list down further with its own radius and count.

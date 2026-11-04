@@ -10,6 +10,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
+from homeassistant.const import UnitOfLength
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -36,12 +37,16 @@ async def async_setup_entry(
     coordinator = entry.runtime_data
     if isinstance(coordinator, NaolibBikeCoordinator):
         station = coordinator.tracked[entry.entry_id]
-        async_add_entities(
-            [
-                NaolibBikesAvailableSensor(coordinator, station),
-                NaolibDocksAvailableSensor(coordinator, station),
-            ]
-        )
+        entities: list[SensorEntity] = [
+            NaolibBikesAvailableSensor(coordinator, station)
+        ]
+        # Voi spots are painted on the ground: there is no dock to count, but
+        # every bike reports its remaining range.
+        if coordinator.feed.has_docks:
+            entities.append(NaolibDocksAvailableSensor(coordinator, station))
+        if coordinator.feed.vehicles_url is not None:
+            entities.append(NaolibBestRangeSensor(coordinator, station))
+        async_add_entities(entities)
         return
 
     async_add_entities(
@@ -110,7 +115,6 @@ class NaolibBikeStationSensor(CoordinatorEntity[NaolibBikeCoordinator], SensorEn
     _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "vélos"
-    _attr_attribution = "Données Naolib / JCDecaux"
 
     def __init__(
         self,
@@ -120,12 +124,14 @@ class NaolibBikeStationSensor(CoordinatorEntity[NaolibBikeCoordinator], SensorEn
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._station = station
+        feed = coordinator.feed
+        self._attr_attribution = feed.attribution
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{BIKE_ID_PREFIX}{station.id}")},
+            identifiers={(DOMAIN, f"{BIKE_ID_PREFIX}{station.key}")},
             translation_key="bike_station",
             translation_placeholders={"name": station.name},
-            manufacturer="Naolib",
-            model="Station vélo",
+            manufacturer=feed.manufacturer,
+            model=feed.model,
         )
         self._station_data = build_station_data(coordinator.data or {}, station)
 
@@ -150,7 +156,7 @@ class NaolibBikesAvailableSensor(NaolibBikeStationSensor):
 
     # Rebuilt on every poll and only useful to the card; keeping it out of the
     # recorder avoids bloating the database.
-    _unrecorded_attributes = frozenset({"nearby_stations"})
+    _unrecorded_attributes = frozenset({"nearby_stations", "vehicles"})
 
     def __init__(
         self,
@@ -159,7 +165,7 @@ class NaolibBikesAvailableSensor(NaolibBikeStationSensor):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator, station)
-        self._attr_unique_id = f"naolib_bike_{station.id}_bikes"
+        self._attr_unique_id = bikes_unique_id(station.key)
 
     @property
     def native_value(self) -> int | None:
@@ -173,6 +179,8 @@ class NaolibBikesAvailableSensor(NaolibBikeStationSensor):
         return {
             "station_id": self._station.id,
             "station_label": data.get("name") or self._station.name,
+            "station_code": data.get("code"),
+            "provider": self._station.provider,
             "address": data.get("address"),
             "capacity": data.get("capacity"),
             "docks_available": data.get("docks"),
@@ -182,6 +190,9 @@ class NaolibBikesAvailableSensor(NaolibBikeStationSensor):
             "last_reported": data.get("last_reported"),
             "latitude": data.get("latitude"),
             "longitude": data.get("longitude"),
+            "best_range_km": data.get("best_range_km"),
+            "vehicles": data.get("vehicles"),
+            "app_url": self.coordinator.feed.app_url,
             "nearby_stations": data["nearby_stations"],
         }
 
@@ -199,7 +210,7 @@ class NaolibDocksAvailableSensor(NaolibBikeStationSensor):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator, station)
-        self._attr_unique_id = f"naolib_bike_{station.id}_docks"
+        self._attr_unique_id = f"naolib_bike_{station.key}_docks"
 
     @property
     def native_value(self) -> int | None:
@@ -214,3 +225,40 @@ class NaolibDocksAvailableSensor(NaolibBikeStationSensor):
             "station_label": self._station_data.get("name") or self._station.name,
             "capacity": self._station_data.get("capacity"),
         }
+
+
+class NaolibBestRangeSensor(NaolibBikeStationSensor):
+    """Longest range among the bikes that can be rented at the spot."""
+
+    _attr_translation_key = "best_range"
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_native_unit_of_measurement = UnitOfLength.KILOMETERS
+    _attr_suggested_display_precision = 0
+
+    def __init__(
+        self,
+        coordinator: NaolibBikeCoordinator,
+        station: NaolibBikeStation,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, station)
+        self._attr_unique_id = f"naolib_bike_{station.key}_range"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the best range in km, or None without any rentable bike."""
+        best: int | None = self._station_data.get("best_range_km")
+        return best
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the station identity, for automations."""
+        return {
+            "station_id": self._station.id,
+            "station_label": self._station_data.get("name") or self._station.name,
+        }
+
+
+def bikes_unique_id(key: str) -> str:
+    """Return the unique id of a station's "bikes available" sensor."""
+    return f"naolib_bike_{key}_bikes"

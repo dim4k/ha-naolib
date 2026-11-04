@@ -22,6 +22,10 @@ export const TICK_MS = 20000;
 export const URGENT_MINUTES = 1;
 export const WARNING_MINUTES = 3;
 
+// Bike range colouring thresholds, in km: a Voi bike tops out at 80 km.
+export const RANGE_URGENT_KM = 5;
+export const RANGE_WARNING_KM = 15;
+
 // Minimum delay/advance vs the theoretical timetable worth showing.
 export const DELAY_TOLERANCE_MINUTES = 2;
 

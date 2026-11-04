@@ -17,6 +17,8 @@ var MS_PER_MINUTE = 6e4;
 var TICK_MS = 2e4;
 var URGENT_MINUTES = 1;
 var WARNING_MINUTES = 3;
+var RANGE_URGENT_KM = 5;
+var RANGE_WARNING_KM = 15;
 var DELAY_TOLERANCE_MINUTES = 2;
 var SERVICE_DAY_CUTOFF_HOUR = 4;
 
@@ -145,6 +147,14 @@ var bike = `
     .bike-label { font-size: 0.8em; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.5px; }
     .bike-gauge { margin-top: 12px; height: 6px; border-radius: 3px; background: var(--naolib-neutral-strong); overflow: hidden; }
     .bike-gauge-fill { height: 100%; background: var(--primary-color); transition: width 0.3s; }
+    .bike-ranges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+    .bike-range { font-size: 0.8em; font-weight: 500; padding: 2px 7px; border-radius: 999px; background: var(--naolib-neutral); color: var(--primary-text-color); white-space: nowrap; }
+    .bike-range.low { background-color: rgba(241, 196, 15, 0.2); color: var(--naolib-warning); }
+    .bike-range.empty { background-color: rgba(231, 76, 60, 0.2); color: var(--naolib-urgent); }
+    .bike-range.disabled, .bike-range.more { color: var(--secondary-text-color); }
+    .bike-range.disabled { text-decoration: line-through; }
+    .bike-app { display: inline-block; margin-top: 10px; font-size: 0.85em; font-weight: 500; color: var(--primary-color); text-decoration: none; }
+    .bike-app:hover, .bike-app:focus-visible { text-decoration: underline; }
     .bike-status { margin-top: 10px; padding: 6px 10px; border-radius: 6px; text-align: center; font-size: 0.85em; font-weight: 500; background: rgba(231, 76, 60, 0.15); color: var(--naolib-urgent); }
     .bike-nearby { border-top: 1px solid var(--divider-color); padding: 8px 16px 12px; }
     .bike-nearby-title { font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--secondary-text-color); margin-bottom: 4px; }
@@ -153,8 +163,8 @@ var bike = `
     .bike-nearby-row.closed { opacity: 0.5; }
     .bike-nearby-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .bike-nearby-distance { font-size: 0.8em; color: var(--secondary-text-color); white-space: nowrap; }
-    .bike-nearby-bikes, .bike-nearby-docks { font-weight: bold; white-space: nowrap; min-width: 56px; text-align: right; }
-    .bike-nearby-bikes span, .bike-nearby-docks span { font-weight: normal; font-size: 0.75em; color: var(--secondary-text-color); }
+    .bike-nearby-bikes, .bike-nearby-docks, .bike-nearby-range { font-weight: bold; white-space: nowrap; min-width: 56px; text-align: right; }
+    .bike-nearby-bikes span, .bike-nearby-docks span, .bike-nearby-range span { font-weight: normal; font-size: 0.75em; color: var(--secondary-text-color); }
     :host([compact]) .bike-main { padding: 0 12px 12px; }
     :host([compact]) .bike-counter { padding: 8px 6px; }
     :host([compact]) .bike-count { font-size: 1.5em; }
@@ -1501,6 +1511,7 @@ var DEFAULT_BIKE_CONFIG = {
   nearby_radius: 500,
   // meters
   show_docks: true,
+  // JCDecaux stations only: Voi spots have no docks
   compact: false
 };
 var MAX_NEARBY_COUNT = 10;
@@ -1527,6 +1538,7 @@ function prepareNearby(stations, config) {
 }
 
 // src/bike/render.js
+var MAX_RANGE_CHIPS = 8;
 function countClass(value, capacity) {
   if (typeof value !== "number") return "bike-count";
   if (value === 0) return "bike-count empty";
@@ -1534,6 +1546,18 @@ function countClass(value, capacity) {
     return "bike-count low";
   }
   return "bike-count";
+}
+function rangeLevel(km) {
+  if (typeof km !== "number") return "";
+  if (km <= RANGE_URGENT_KM) return " empty";
+  if (km <= RANGE_WARNING_KM) return " low";
+  return "";
+}
+function stationFeatures(data, config) {
+  return {
+    docks: config.show_docks && typeof data.docks === "number",
+    range: Array.isArray(data.vehicles)
+  };
 }
 function statusHtml(data) {
   const notices = [];
@@ -1555,36 +1579,64 @@ function gaugeHtml(bikes, capacity) {
         </div>
     `;
 }
-function counterHtml(label, value, capacity, icon) {
+function counterHtml(label, value, className, icon) {
   const text = typeof value === "number" ? String(value) : "—";
   return `
         <div class="bike-counter">
             <ha-icon icon="${icon}"></ha-icon>
-            <div class="${countClass(value, capacity)}">${text}</div>
+            <div class="${className}">${text}</div>
             <div class="bike-label">${esc(label)}</div>
         </div>
     `;
 }
-function nearbyRowHtml(station, config) {
+function rangeChipHtml(vehicle) {
+  if (vehicle.disabled) {
+    return `<span class="bike-range disabled" title="Vélo hors service">HS</span>`;
+  }
+  const km = typeof vehicle.range_km === "number" ? vehicle.range_km : "?";
+  return `<span class="bike-range${rangeLevel(vehicle.range_km)}">${esc(String(km))} km</span>`;
+}
+function rangesHtml(vehicles) {
+  if (!vehicles.length) return "";
+  const shown = vehicles.slice(0, MAX_RANGE_CHIPS);
+  const hidden = vehicles.length - shown.length;
+  const more = hidden > 0 ? `<span class="bike-range more">+${hidden}</span>` : "";
+  return `
+        <div class="bike-ranges" aria-label="Autonomie des vélos">
+            ${shown.map(rangeChipHtml).join("")}${more}
+        </div>
+    `;
+}
+function appLinkHtml(url) {
+  if (typeof url !== "string" || !url) return "";
+  return `<a class="bike-app" href="${esc(url)}" rel="noopener">Ouvrir l'application</a>`;
+}
+function nearbyRowHtml(station, features) {
   const bikes = typeof station.bikes === "number" ? station.bikes : "—";
-  const docks = typeof station.docks === "number" ? station.docks : "—";
   const closed = station.is_renting === false ? " closed" : "";
-  const docksCell = config.show_docks ? `<div class="bike-nearby-docks">${docks} <span>pl.</span></div>` : "";
+  let extra = "";
+  if (features.docks) {
+    const docks = typeof station.docks === "number" ? station.docks : "—";
+    extra = `<div class="bike-nearby-docks">${docks} <span>pl.</span></div>`;
+  } else if (features.range) {
+    const km = typeof station.best_range_km === "number" ? station.best_range_km : "—";
+    extra = `<div class="bike-nearby-range">${km} <span>km</span></div>`;
+  }
   return `
         <div class="bike-nearby-row${closed}">
             <div class="bike-nearby-name">${esc(station.name)}</div>
             <div class="bike-nearby-distance">${esc(String(station.distance))} m</div>
             <div class="bike-nearby-bikes">${bikes} <span>vélos</span></div>
-            ${docksCell}
+            ${extra}
         </div>
     `;
 }
-function nearbyHtml(stations, config) {
+function nearbyHtml(stations, features) {
   if (!stations.length) return "";
   return `
         <div class="bike-nearby">
             <div class="bike-nearby-title">Stations à proximité</div>
-            ${stations.map((station) => nearbyRowHtml(station, config)).join("")}
+            ${stations.map((station) => nearbyRowHtml(station, features)).join("")}
         </div>
     `;
 }
@@ -1592,26 +1644,43 @@ function renderBikeStation(data, nearby, config) {
   if (!data.available) {
     return message("Station introuvable dans les données Naolib");
   }
+  const features = stationFeatures(data, config);
   const counters = [
-    counterHtml("vélos", data.bikes, data.capacity, "mdi:bike")
+    counterHtml(
+      "vélos",
+      data.bikes,
+      countClass(data.bikes, data.capacity),
+      "mdi:bike"
+    )
   ];
-  if (config.show_docks) {
+  if (features.docks) {
     counters.push(
       counterHtml(
         "places",
         data.docks,
-        data.capacity,
+        countClass(data.docks, data.capacity),
         "mdi:rhombus-outline"
       )
     );
   }
+  if (features.range) {
+    counters.push(
+      counterHtml(
+        "km max",
+        data.best_range_km,
+        `bike-count${rangeLevel(data.best_range_km)}`,
+        "mdi:battery-charging-high"
+      )
+    );
+  }
+  const details = config.compact ? "" : `${gaugeHtml(data.bikes, data.capacity)}${features.range ? rangesHtml(data.vehicles) : ""}${appLinkHtml(data.app_url)}`;
   return `
         <div class="bike-main">
             <div class="bike-counters">${counters.join("")}</div>
-            ${config.compact ? "" : gaugeHtml(data.bikes, data.capacity)}
+            ${details}
             ${statusHtml(data)}
         </div>
-        ${nearbyHtml(nearby, config)}
+        ${nearbyHtml(nearby, features)}
     `;
 }
 
@@ -1631,7 +1700,10 @@ var NaolibBikeCard = class extends NaolibBaseCard {
       capacity: attributes.capacity,
       is_installed: attributes.is_installed,
       is_renting: attributes.is_renting,
-      is_returning: attributes.is_returning
+      is_returning: attributes.is_returning,
+      best_range_km: attributes.best_range_km,
+      vehicles: attributes.vehicles,
+      app_url: attributes.app_url
     };
   }
   _render() {
@@ -1675,6 +1747,7 @@ var HELPERS2 = {
   title: "Laisser vide pour utiliser le nom de la station.",
   nearby_count: "Mettre à 0 pour masquer les stations voisines.",
   nearby_radius: "Les stations plus éloignées ne sont pas proposées.",
+  show_docks: "Sans effet sur les emplacements Voi, qui n'ont pas de bornes.",
   compact: "Masque la jauge de remplissage."
 };
 function buildSchema2(hass, config) {

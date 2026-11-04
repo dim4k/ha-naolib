@@ -4,7 +4,11 @@ import {
     normalizeBikeConfig,
     prepareNearby,
 } from "../../src/bike/config.js";
-import { renderBikeStation } from "../../src/bike/render.js";
+import {
+    MAX_RANGE_CHIPS,
+    renderBikeStation,
+    stationFeatures,
+} from "../../src/bike/render.js";
 
 function station(overrides) {
     return {
@@ -138,6 +142,119 @@ describe("renderBikeStation", () => {
             withoutDocks,
         );
         expect(html).not.toMatch(/places/);
+        expect(html).not.toMatch(/pl\./);
+    });
+});
+
+// A Voi spot: painted on the ground, no dock, every bike with its range.
+function voiSpot(overrides) {
+    return {
+        available: true,
+        bikes: 3,
+        docks: null,
+        capacity: 8,
+        is_installed: true,
+        is_renting: true,
+        is_returning: true,
+        best_range_km: 62,
+        vehicles: [
+            { range_km: 62, disabled: false },
+            { range_km: 12, disabled: false },
+            { range_km: 3, disabled: false },
+            { range_km: 40, disabled: true },
+        ],
+        app_url: "voiapp://closest_vehicle",
+        ...overrides,
+    };
+}
+
+describe("stationFeatures", () => {
+    const config = normalizeBikeConfig({});
+
+    it("counts docks only where the operator has some", () => {
+        expect(stationFeatures({ docks: 4 }, config)).toEqual({
+            docks: true,
+            range: false,
+        });
+        expect(stationFeatures(voiSpot(), config)).toEqual({
+            docks: false,
+            range: true,
+        });
+    });
+
+    it("leaves the docks out when they are turned off", () => {
+        const withoutDocks = normalizeBikeConfig({ show_docks: false });
+        expect(stationFeatures({ docks: 4 }, withoutDocks).docks).toBe(false);
+    });
+});
+
+describe("renderBikeStation on a Voi spot", () => {
+    const config = normalizeBikeConfig({});
+
+    it("shows the best range instead of the docks", () => {
+        const html = renderBikeStation(voiSpot(), [], config);
+        expect(html).not.toMatch(/places/);
+        expect(html).toMatch(/km max/);
+        expect(html).toMatch(/>62</);
+    });
+
+    it("lists the range of each bike, flagging the low ones", () => {
+        const html = renderBikeStation(voiSpot(), [], config);
+        expect(html).toMatch(/bike-range">62 km/);
+        expect(html).toMatch(/bike-range low">12 km/);
+        expect(html).toMatch(/bike-range empty">3 km/);
+        expect(html).toMatch(/bike-range disabled[^>]*>HS/);
+    });
+
+    it("caps the ranges listed", () => {
+        const vehicles = Array.from({ length: MAX_RANGE_CHIPS + 2 }, () => ({
+            range_km: 50,
+            disabled: false,
+        }));
+        const html = renderBikeStation(voiSpot({ vehicles }), [], config);
+        expect(html.match(/50 km/g)).toHaveLength(MAX_RANGE_CHIPS);
+        expect(html).toMatch(/\+2</);
+    });
+
+    it("reports a bike of unknown range", () => {
+        const vehicles = [{ range_km: null, disabled: false }];
+        const html = renderBikeStation(voiSpot({ vehicles }), [], config);
+        expect(html).toMatch(/\? km/);
+    });
+
+    it("links to the operator's app", () => {
+        const html = renderBikeStation(voiSpot(), [], config);
+        expect(html).toMatch(/href="voiapp:\/\/closest_vehicle"/);
+    });
+
+    it("keeps the compact layout to the counters", () => {
+        const compact = normalizeBikeConfig({ compact: true });
+        const html = renderBikeStation(voiSpot(), [], compact);
+        expect(html).not.toMatch(/bike-ranges/);
+        expect(html).not.toMatch(/bike-app/);
+    });
+
+    it("shows a dash when no bike can be rented", () => {
+        const html = renderBikeStation(
+            voiSpot({ bikes: 0, best_range_km: null, vehicles: [] }),
+            [],
+            config,
+        );
+        expect(html).toMatch(/bike-count">—/);
+        expect(html).not.toMatch(/bike-ranges/);
+    });
+
+    it("gives the neighbours their best range", () => {
+        const html = renderBikeStation(
+            voiSpot(),
+            [
+                station({ docks: null, best_range_km: 45 }),
+                station({ docks: null, best_range_km: null }),
+            ],
+            config,
+        );
+        expect(html).toMatch(/bike-nearby-range">45 <span>km/);
+        expect(html).toMatch(/bike-nearby-range">— <span>km/);
         expect(html).not.toMatch(/pl\./);
     });
 });

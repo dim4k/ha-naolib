@@ -33,6 +33,9 @@ export class NaolibBikeCard extends NaolibBaseCard {
             is_installed: attributes.is_installed,
             is_renting: attributes.is_renting,
             is_returning: attributes.is_returning,
+            best_range_km: attributes.best_range_km,
+            vehicles: attributes.vehicles,
+            app_url: attributes.app_url,
         };
     }
 
