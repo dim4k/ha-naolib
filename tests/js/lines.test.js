@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lineBadge, lineColors } from "../../src/lines.js";
+import { compareLines, lineBadge, lineColors } from "../../src/lines.js";
 
 describe("lineColors", () => {
     it("uses the colour the network declares", () => {
@@ -44,5 +44,22 @@ describe("lineBadge", () => {
 
     it("escapes the line number", () => {
         expect(lineBadge("<img>")).not.toContain("<img>");
+    });
+});
+
+describe("compareLines", () => {
+    it("sorts the numbers by value and the letters after them", () => {
+        expect(["C1", "10", "2", "C20", "C3", "1"].sort(compareLines)).toEqual([
+            "1",
+            "2",
+            "10",
+            "C1",
+            "C3",
+            "C20",
+        ]);
+    });
+
+    it("accepts lines that are not strings", () => {
+        expect([10, "2"].sort(compareLines)).toEqual(["2", 10]);
     });
 });

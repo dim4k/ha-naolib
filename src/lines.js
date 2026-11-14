@@ -80,6 +80,11 @@ const MODE_LABELS = {
     4: "Navibus",
 };
 
+// Order of the lines wherever they are listed: "2" before "10", then "C1".
+export function compareLines(a, b) {
+    return String(a).localeCompare(String(b), undefined, { numeric: true });
+}
+
 export function lineColors(line) {
     return LINE_COLORS[String(line).toUpperCase()] || FALLBACK;
 }

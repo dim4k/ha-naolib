@@ -5,13 +5,18 @@ import { message, timeClass } from "./shared.js";
 import { formatClock } from "../time.js";
 import { DELAY_TOLERANCE_MINUTES, ID_SCHEDULE_BTN, MS_PER_MINUTE } from "../constants.js";
 
+// "HH:MM" of a departure, or nothing when its timestamp cannot be read.
+function departureClock(item) {
+    const expected = Date.parse(item.expected_ts);
+    return Number.isNaN(expected) ? "" : formatClock(new Date(expected));
+}
+
 // Departure clock, and the theoretical one struck through next to it when the
 // vehicle drifts from the timetable (SIRI Aimed vs Expected). Showing both
 // times says how late the bus is *and* when it actually leaves.
 function clocksHtml(item) {
-    const expected = Date.parse(item.expected_ts);
-    if (Number.isNaN(expected)) return "";
-    const real = formatClock(new Date(expected));
+    const real = departureClock(item);
+    if (!real) return "";
     const delay = item.delay_minutes;
     if (
         typeof delay !== "number" ||
@@ -19,7 +24,9 @@ function clocksHtml(item) {
     ) {
         return `<span class="clock strong">${real}</span>`;
     }
-    const aimed = formatClock(new Date(expected - delay * MS_PER_MINUTE));
+    const aimed = formatClock(
+        new Date(Date.parse(item.expected_ts) - delay * MS_PER_MINUTE),
+    );
     const state = delay > 0 ? "late" : "early";
     const title =
         delay > 0
@@ -51,9 +58,8 @@ function tileRow(departure, timesHtml) {
 // The following departure only gets its real clock: a second struck-through
 // time would drown the one that matters.
 function nextClock(item) {
-    const expected = Date.parse(item.expected_ts);
-    if (Number.isNaN(expected)) return "";
-    const clock = formatClock(new Date(expected));
+    const clock = departureClock(item);
+    if (!clock) return "";
     return `<span class="clock${isLate(item) ? " late" : ""}">${clock}</span>`;
 }
 
@@ -87,10 +93,8 @@ function tileHtml(first, second) {
 // Compact mode trades the clocks for density: one row per departure, the
 // exact time left to the tooltip.
 function compactTileHtml(departure) {
-    const expected = Date.parse(departure.expected_ts);
-    const title = Number.isNaN(expected)
-        ? ""
-        : ` title="${formatClock(new Date(expected))}"`;
+    const clock = departureClock(departure);
+    const title = clock ? ` title="${clock}"` : "";
     const mark = departure.is_last ? `<span class="mark">dernier</span>` : "";
     const countdown = `<div class="${timeClass(departure.minutes)}"${title}>${esc(departure.time)}</div>`;
     return `<div class="tile">${tileRow(departure, `${mark}${countdown}`)}</div>`;

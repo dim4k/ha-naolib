@@ -575,6 +575,9 @@ var MODE_LABELS = {
   3: "Bus",
   4: "Navibus"
 };
+function compareLines(a, b) {
+  return String(a).localeCompare(String(b), void 0, { numeric: true });
+}
 function lineColors(line) {
   return LINE_COLORS[String(line).toUpperCase()] || FALLBACK;
 }
@@ -970,7 +973,6 @@ function prepareDepartures(departures2, config, now = Date.now()) {
 }
 
 // src/directions.js
-var byLine = (a, b) => a.localeCompare(b, void 0, { numeric: true });
 function directionTermini(schedules, departures2, lines = []) {
   const wanted = new Set(lines.map(String));
   const termini = { 1: /* @__PURE__ */ new Map(), 2: /* @__PURE__ */ new Map() };
@@ -996,7 +998,7 @@ function directionLabel(termini, direction) {
   const lines = termini[direction];
   if (!lines?.size) return `Direction ${direction}`;
   const linesByTerminus = /* @__PURE__ */ new Map();
-  for (const line of [...lines.keys()].sort(byLine)) {
+  for (const line of [...lines.keys()].sort(compareLines)) {
     const terminus = [...lines.get(line)].sort().join(" / ");
     if (!linesByTerminus.has(terminus)) linesByTerminus.set(terminus, []);
     linesByTerminus.get(terminus).push(line);
@@ -1012,15 +1014,20 @@ function directionHeading(departures2, direction) {
 }
 
 // src/render/departures.js
-function clocksHtml(item) {
+function departureClock(item) {
   const expected = Date.parse(item.expected_ts);
-  if (Number.isNaN(expected)) return "";
-  const real = formatClock(new Date(expected));
+  return Number.isNaN(expected) ? "" : formatClock(new Date(expected));
+}
+function clocksHtml(item) {
+  const real = departureClock(item);
+  if (!real) return "";
   const delay = item.delay_minutes;
   if (typeof delay !== "number" || Math.abs(delay) < DELAY_TOLERANCE_MINUTES) {
     return `<span class="clock strong">${real}</span>`;
   }
-  const aimed = formatClock(new Date(expected - delay * MS_PER_MINUTE));
+  const aimed = formatClock(
+    new Date(Date.parse(item.expected_ts) - delay * MS_PER_MINUTE)
+  );
   const state = delay > 0 ? "late" : "early";
   const title = delay > 0 ? `${delay} min de retard sur l'horaire théorique` : `${-delay} min d'avance sur l'horaire théorique`;
   return `<span class="clock aimed">${aimed}</span><span class="clock strong ${state}" title="${title}">${real}</span>`;
@@ -1041,9 +1048,8 @@ function tileRow(departure, timesHtml) {
     `;
 }
 function nextClock(item) {
-  const expected = Date.parse(item.expected_ts);
-  if (Number.isNaN(expected)) return "";
-  const clock = formatClock(new Date(expected));
+  const clock = departureClock(item);
+  if (!clock) return "";
   return `<span class="clock${isLate(item) ? " late" : ""}">${clock}</span>`;
 }
 function stripHtml(first, second) {
@@ -1067,8 +1073,8 @@ function tileHtml(first, second) {
     `;
 }
 function compactTileHtml(departure) {
-  const expected = Date.parse(departure.expected_ts);
-  const title = Number.isNaN(expected) ? "" : ` title="${formatClock(new Date(expected))}"`;
+  const clock = departureClock(departure);
+  const title = clock ? ` title="${clock}"` : "";
   const mark = departure.is_last ? `<span class="mark">dernier</span>` : "";
   const countdown = `<div class="${timeClass(departure.minutes)}"${title}>${esc(departure.time)}</div>`;
   return `<div class="tile">${tileRow(departure, `${mark}${countdown}`)}</div>`;
@@ -1126,14 +1132,14 @@ function renderTimetableHeader(extra = "") {
     `;
 }
 function groupSchedules(schedules, config) {
-  const byLine2 = /* @__PURE__ */ new Map();
+  const byLine = /* @__PURE__ */ new Map();
   for (const key of Object.keys(schedules || {})) {
     const [line, direction] = key.split("|");
     if (!matchesFilters(line, direction, config)) continue;
     const data = schedules[key];
     if (!data) continue;
-    if (!byLine2.has(line)) byLine2.set(line, { line, directions: [] });
-    byLine2.get(line).directions.push({
+    if (!byLine.has(line)) byLine.set(line, { line, directions: [] });
+    byLine.get(line).directions.push({
       key,
       line,
       direction: Number(direction),
@@ -1141,9 +1147,7 @@ function groupSchedules(schedules, config) {
       times: data.times || {}
     });
   }
-  return [...byLine2.values()].sort(
-    (a, b) => String(a.line).localeCompare(String(b.line), void 0, { numeric: true })
-  ).map((group) => ({
+  return [...byLine.values()].sort((a, b) => compareLines(a.line, b.line)).map((group) => ({
     ...group,
     directions: group.directions.sort((a, b) => a.direction - b.direction)
   }));
@@ -1906,7 +1910,7 @@ function lineOptions(hass, config) {
     departures2.map((departure) => String(departure.line ?? "")).filter(Boolean)
   );
   for (const line of config.lines) lines.add(String(line));
-  return [...lines].sort((a, b) => a.localeCompare(b, void 0, { numeric: true })).map((line) => ({ value: line, label: line }));
+  return [...lines].sort(compareLines).map((line) => ({ value: line, label: line }));
 }
 function buildSchema3(hass, config) {
   return [

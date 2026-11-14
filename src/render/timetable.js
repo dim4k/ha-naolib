@@ -1,6 +1,6 @@
 import { esc } from "../html.js";
 import { matchesFilters } from "../config.js";
-import { lineBadge } from "../lines.js";
+import { compareLines, lineBadge } from "../lines.js";
 import { message } from "./shared.js";
 import {
     formatClock,
@@ -57,9 +57,7 @@ export function groupSchedules(schedules, config) {
     }
 
     return [...byLine.values()]
-        .sort((a, b) =>
-            String(a.line).localeCompare(String(b.line), undefined, { numeric: true }),
-        )
+        .sort((a, b) => compareLines(a.line, b.line))
         .map((group) => ({
             ...group,
             directions: group.directions.sort((a, b) => a.direction - b.direction),
