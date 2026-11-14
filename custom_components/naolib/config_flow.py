@@ -246,9 +246,16 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     and entry.unique_id == unique_id
                 ):
                     return self.async_abort(reason="already_configured")
-            return self.async_update_reload_and_abort(
+            changed = self.hass.config_entries.async_update_entry(
                 reconfigure_entry, title=title, unique_id=unique_id, data=data
             )
+            # A loaded entry is reloaded by its update listener as soon as it
+            # changes: reloading it here as well would set it up twice.
+            if not changed or not reconfigure_entry.update_listeners:
+                self.hass.config_entries.async_schedule_reload(
+                    reconfigure_entry.entry_id
+                )
+            return self.async_abort(reason="reconfigure_successful")
 
         self._abort_if_unique_id_configured()
         return self.async_create_entry(title=title, data=data)

@@ -36,6 +36,7 @@ from custom_components.naolib.const import (
 )
 from custom_components.naolib.diagnostics import async_get_config_entry_diagnostics
 from custom_components.naolib.schedules import service_day
+from custom_components.naolib.stops import load_stops
 
 
 @pytest.fixture(autouse=True)
@@ -117,6 +118,34 @@ async def test_entries_set_up_together_share_one_request(hass: HomeAssistant) ->
         assert state is not None
         assert len(state.attributes["next_departures"]) == 1
     hass.data[DOMAIN].departures._cancel_deferred()
+
+
+async def test_reconfigure_reloads_the_entry_once(hass: HomeAssistant) -> None:
+    """A reconfigured entry is set up again once, not once per reload mechanism."""
+    entry = _entry()
+    await _setup(hass, entry)
+    coordinator = hass.data[DOMAIN].departures
+    target = load_stops()[0]
+
+    with (
+        patch.object(coordinator.api, "async_get_all_departures", return_value={}),
+        patch("custom_components.naolib.coordinator.last_departures", return_value={}),
+        patch.object(coordinator, "register", wraps=coordinator.register) as register,
+    ):
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"next_step_id": "by_list"}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_STOP_CODE: target["id"]}
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.state is ConfigEntryState.LOADED
+    assert coordinator.tracked[entry.entry_id].code == target["id"]
+    assert register.call_count == 1
+    coordinator._cancel_deferred()
 
 
 async def test_setup_and_unload(hass: HomeAssistant) -> None:
