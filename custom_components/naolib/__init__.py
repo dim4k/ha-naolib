@@ -71,7 +71,7 @@ from .coordinator import (
     filter_departures,
 )
 from .live import NaolibLiveAround
-from .schedules import build_timetable, calendar_end
+from .schedules import build_timetable, calendar_end, service_day
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -412,7 +412,7 @@ async def handle_timetable(
     """Return the full timetable of a configured stop for one day.
 
     The departures themselves are not sent: the card reads them from the
-    sensor attributes.
+    sensor attributes. Days are service days, which end in the small hours.
     """
     stop_code = msg["stop_code"]
     if hass.data[DOMAIN].departures.stop_by_code(stop_code) is None:
@@ -421,7 +421,7 @@ async def handle_timetable(
         )
         return
 
-    day = dt_util.now().date() + timedelta(days=msg["day_offset"])
+    day = service_day(dt_util.now()) + timedelta(days=msg["day_offset"])
     timetable, end = await hass.async_add_executor_job(_timetable, stop_code, day)
     connection.send_result(
         msg["id"],

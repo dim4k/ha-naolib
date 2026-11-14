@@ -1,3 +1,5 @@
+import { serviceDay } from "./time.js";
+
 // The timetables a card fetched, one per day browsed. Days are counted from
 // today, so an offset only means something on the day it was fetched: a
 // dashboard left open overnight would otherwise keep showing yesterday's
@@ -23,10 +25,10 @@ export class TimetableCache {
         this._empty();
     }
 
-    // Forget everything once the calendar day has changed since the last
+    // Forget everything once the service day has changed since the last
     // call. Returns whether anything had to be dropped.
     rollover(now = new Date()) {
-        const day = new Date(now).toDateString();
+        const day = serviceDay(now).toDateString();
         if (this._day === day) return false;
         const stale = this._day !== null;
         this._day = day;

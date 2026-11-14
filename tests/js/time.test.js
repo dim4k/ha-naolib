@@ -3,6 +3,7 @@ import {
     formatClock,
     humanizeSeconds,
     passageDate,
+    serviceDay,
     serviceHourKey,
 } from "../../src/time.js";
 
@@ -53,5 +54,32 @@ describe("passageDate", () => {
     it("keeps them on the current day when it is already the small hours", () => {
         const now = new Date(2026, 7, 5, 1, 0).getTime();
         expect(passageDate(now, 1, 10)).toEqual(new Date(2026, 7, 5, 1, 10));
+    });
+
+    it("puts the daytime slots on the day before, seen from the small hours", () => {
+        const now = new Date(2026, 7, 5, 1, 0).getTime();
+        expect(passageDate(now, 22, 30)).toEqual(new Date(2026, 7, 4, 22, 30));
+        expect(passageDate(now, 4, 0)).toEqual(new Date(2026, 7, 4, 4, 0));
+    });
+});
+
+describe("serviceDay", () => {
+    const day = (date) => [date.getFullYear(), date.getMonth(), date.getDate()];
+
+    it("is the calendar day from the cutoff on", () => {
+        expect(day(serviceDay(new Date(2026, 7, 5, 4, 0)))).toEqual([2026, 7, 5]);
+        expect(day(serviceDay(new Date(2026, 7, 5, 23, 59)))).toEqual([2026, 7, 5]);
+    });
+
+    it("is the day before in the small hours", () => {
+        expect(day(serviceDay(new Date(2026, 7, 5, 0, 0)))).toEqual([2026, 7, 4]);
+        expect(day(serviceDay(new Date(2026, 7, 5, 3, 59)))).toEqual([2026, 7, 4]);
+        expect(day(serviceDay(new Date(2026, 7, 1, 2, 0)))).toEqual([2026, 6, 31]);
+    });
+
+    it("leaves its argument untouched", () => {
+        const now = new Date(2026, 7, 5, 1, 0);
+        serviceDay(now);
+        expect(now).toEqual(new Date(2026, 7, 5, 1, 0));
     });
 });

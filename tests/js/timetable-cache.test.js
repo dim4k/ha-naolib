@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { TimetableCache } from "../../src/timetable-cache.js";
 
+// A service day ends in the small hours of the next calendar day.
 const MONDAY = new Date(2026, 10, 16, 23, 59);
-const TUESDAY = new Date(2026, 10, 17, 0, 1);
+const MONDAY_NIGHT = new Date(2026, 10, 17, 3, 59);
+const TUESDAY = new Date(2026, 10, 17, 4, 0);
 const ANSWER = { timetable: { "C3|1": { times: { "08": ["05"] } } } };
 
 describe("TimetableCache", () => {
@@ -57,6 +59,7 @@ describe("TimetableCache", () => {
         expect(cache.rollover(MONDAY)).toBe(false);
         cache.begin(0)(ANSWER);
         expect(cache.rollover(MONDAY)).toBe(false);
+        expect(cache.rollover(MONDAY_NIGHT)).toBe(false);
         expect(cache.isFetched(0)).toBe(true);
     });
 
@@ -73,7 +76,7 @@ describe("TimetableCache", () => {
         expect(cache.rollover(TUESDAY)).toBe(false);
     });
 
-    it("ignores an answer that straddled midnight", () => {
+    it("ignores an answer that straddled the end of the day", () => {
         const cache = new TimetableCache();
         cache.rollover(MONDAY);
         const settle = cache.begin(0);

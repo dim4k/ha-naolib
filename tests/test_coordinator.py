@@ -1,6 +1,6 @@
 """Tests for the shared coordinator: stop registry and per-stop formatting."""
 
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 import logging
 from unittest.mock import patch
 
@@ -211,6 +211,40 @@ async def test_transient_failure_serves_the_last_snapshot(
 
     assert "available again" in caplog.text
     assert last.called
+
+
+async def test_last_departures_follow_the_service_day(
+    hass: HomeAssistant, freezer
+) -> None:
+    """Past midnight the last departures are still those of the day before."""
+    coordinator = NaolibDeparturesCoordinator(hass)
+    stop = NaolibStop("S1", "A", ["Q1"], 60)
+    coordinator.register("e1", stop)
+    zone = dt_util.get_default_time_zone()
+
+    with (
+        patch.object(coordinator.api, "async_get_all_departures", return_value={}),
+        patch(
+            "custom_components.naolib.coordinator.last_departures",
+            return_value={"C3|1": "0045"},
+        ) as last,
+    ):
+        # Sunday 00:30: Saturday's service is still running.
+        freezer.move_to(datetime(2026, 11, 15, 0, 30, tzinfo=zone))
+        await coordinator._async_update_data()
+        assert last.call_args.args == ("S1", date(2026, 11, 14))
+        assert stop.last_times_date == date(2026, 11, 14)
+
+        # Nothing to recompute until the service day ends.
+        freezer.move_to(datetime(2026, 11, 15, 3, 59, tzinfo=zone))
+        await coordinator._async_update_data()
+        assert last.call_count == 1
+
+        freezer.move_to(datetime(2026, 11, 15, 4, 0, tzinfo=zone))
+        await coordinator._async_update_data()
+        assert last.call_args.args == ("S1", date(2026, 11, 15))
+
+    coordinator.unregister("e1")
 
 
 async def test_refresh_requests_wait_for_the_rate_limit(hass: HomeAssistant) -> None:

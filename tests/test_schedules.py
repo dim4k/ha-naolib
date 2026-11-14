@@ -1,7 +1,7 @@
 """Tests for the embedded GTFS timetables."""
 
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime
 import sqlite3
 from unittest.mock import MagicMock, patch
 
@@ -131,6 +131,16 @@ def test_calendar_end_without_calendar() -> None:
     """No calendar shipped means no known end either."""
     with patch.object(schedules, "load_calendar", return_value={}):
         assert schedules.calendar_end() is None
+
+
+def test_service_day_counts_the_small_hours_as_the_day_before() -> None:
+    """A service day runs until the cutoff of the next calendar day."""
+    assert schedules.service_day(datetime(2026, 11, 16, 23, 59)) == date(2026, 11, 16)
+    assert schedules.service_day(datetime(2026, 11, 17, 0, 0)) == date(2026, 11, 16)
+    assert schedules.service_day(datetime(2026, 11, 17, 3, 59)) == date(2026, 11, 16)
+    assert schedules.service_day(datetime(2026, 11, 17, 4, 0)) == date(2026, 11, 17)
+    # Across a month.
+    assert schedules.service_day(datetime(2026, 12, 1, 1, 0)) == date(2026, 11, 30)
 
 
 def test_last_departures_wraps_past_midnight() -> None:

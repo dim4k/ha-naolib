@@ -8,6 +8,7 @@ import {
     humanizeSeconds,
     passageDate,
     relativeDay,
+    serviceDay,
     serviceHourKey,
 } from "../time.js";
 import {
@@ -191,7 +192,8 @@ function renderNext(times, now, next, live) {
 }
 
 function renderDays(dayOffset, now) {
-    const date = new Date(now);
+    // Days are service days: in the small hours "today" is still yesterday's.
+    const date = serviceDay(now);
     date.setDate(date.getDate() + dayOffset);
     const nav = (offset, label, iconName, disabled) =>
         `<button type="button" class="tt-day-nav" ${ATTR_DAY}="${offset}" aria-label="${label}"${disabled ? " disabled" : ""}><ha-icon icon="mdi:chevron-${iconName}"></ha-icon></button>`;

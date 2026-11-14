@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import closing
-from datetime import date
+from datetime import date, datetime, timedelta
 from functools import lru_cache
 import json
 import logging
@@ -158,6 +158,15 @@ def _active_times(
         ]
         if times:
             yield group_key, group, times
+
+
+def service_day(now: datetime) -> date:
+    """Return the service day a moment belongs to.
+
+    The small hours are the tail of the day before: at 00:30 on a Sunday the
+    vehicles still run Saturday's timetable.
+    """
+    return (now - timedelta(hours=SERVICE_DAY_CUTOFF_HOUR)).date()
 
 
 def _service_day_key(value: str) -> int:

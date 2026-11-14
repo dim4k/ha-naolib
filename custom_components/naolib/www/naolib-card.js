@@ -616,12 +616,19 @@ function relativeDay(offset) {
   if (offset === 2) return "Après-demain";
   return `Dans ${offset} jours`;
 }
-function passageDate(now, hour, minute) {
-  const reference = new Date(now);
+function serviceDay(now) {
   const date = new Date(now);
+  date.setHours(date.getHours() - SERVICE_DAY_CUTOFF_HOUR);
+  return date;
+}
+function passageDate(now, hour, minute) {
+  const date = new Date(now);
+  const smallHours = date.getHours() < SERVICE_DAY_CUTOFF_HOUR;
   date.setHours(hour, minute, 0, 0);
-  if (hour < SERVICE_DAY_CUTOFF_HOUR && reference.getHours() >= SERVICE_DAY_CUTOFF_HOUR) {
+  if (hour < SERVICE_DAY_CUTOFF_HOUR && !smallHours) {
     date.setDate(date.getDate() + 1);
+  } else if (hour >= SERVICE_DAY_CUTOFF_HOUR && smallHours) {
+    date.setDate(date.getDate() - 1);
   }
   return date;
 }
@@ -1237,7 +1244,7 @@ function renderNext(times, now, next, live) {
     `;
 }
 function renderDays(dayOffset, now) {
-  const date = new Date(now);
+  const date = serviceDay(now);
   date.setDate(date.getDate() + dayOffset);
   const nav = (offset, label, iconName, disabled) => `<button type="button" class="tt-day-nav" ${ATTR_DAY}="${offset}" aria-label="${label}"${disabled ? " disabled" : ""}><ha-icon icon="mdi:chevron-${iconName}"></ha-icon></button>`;
   return `
@@ -1333,10 +1340,10 @@ var TimetableCache = class {
     this._generation += 1;
     this._empty();
   }
-  // Forget everything once the calendar day has changed since the last
+  // Forget everything once the service day has changed since the last
   // call. Returns whether anything had to be dropped.
   rollover(now = /* @__PURE__ */ new Date()) {
-    const day = new Date(now).toDateString();
+    const day = serviceDay(now).toDateString();
     if (this._day === day) return false;
     const stale = this._day !== null;
     this._day = day;
