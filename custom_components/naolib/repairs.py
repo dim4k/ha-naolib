@@ -18,7 +18,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .bike import station_key
 from .config_flow import (
-    async_fetch_voi_stations,
+    async_voi_stations_near,
     find_place,
     location_schema,
     selection_schema,
@@ -34,7 +34,6 @@ from .const import (
     DOMAIN,
 )
 from .sensor import bikes_unique_id
-from .stops import nearest
 
 
 async def async_create_fix_flow(
@@ -92,17 +91,11 @@ class BikeStationRetiredFlow(RepairsFlow):
                 description_placeholders=placeholders,
             )
 
-        location = user_input[CONF_LOCATION]
-        stations = await async_fetch_voi_stations(self.hass)
-        if stations is None:
-            error = "cannot_connect"
-        else:
-            self._stations = nearest(
-                stations, location["latitude"], location["longitude"]
-            )
-            if self._stations:
-                return await self.async_step_select()
-            error = "no_stations_found"
+        self._stations, error = await async_voi_stations_near(
+            self.hass, user_input[CONF_LOCATION]
+        )
+        if error is None:
+            return await self.async_step_select()
 
         return self.async_show_form(
             step_id="location",
