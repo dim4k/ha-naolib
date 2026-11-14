@@ -458,6 +458,10 @@ var MIN_RADIUS = 100;
 var MAX_RADIUS = 3e3;
 var MAX_STOPS = 15;
 var MAX_DEPARTURES = 10;
+var SUBSCRIBE_RETRY_MS = 3e4;
+function canSubscribe(failure, key, now = Date.now()) {
+  return !failure || failure.key !== key || now >= failure.retryAt;
+}
 var check = configValidator("naolib-around-card");
 function normalizeAroundConfig(config) {
   const raw = check.base(config, DEFAULT_AROUND_CONFIG);
@@ -684,13 +688,14 @@ var NaolibAroundCard = class extends NaolibBaseCard {
     const entity = this.config.entity;
     if (!entity) {
       this._unsubscribe();
+      this._failure = null;
       this._message(this.constructor.noEntityMessage);
       return;
     }
     this._name = hass.states[entity]?.attributes?.friendly_name || entity;
     this._updateTitle(this.config.title || `Autour de ${this._name}`);
     this._subscribe();
-    if (!this._data) this._message(LOADING);
+    if (!this._data && !this._failure) this._message(LOADING);
   }
   // One subscription per entity, radius and number of stops; a new
   // configuration replaces it.
@@ -699,7 +704,9 @@ var NaolibAroundCard = class extends NaolibBaseCard {
     if (!this._hass || !this.isConnected || !entity) return;
     const key = `${entity}|${radius}|${maxStops}`;
     if (this._subscriptionKey === key) return;
+    if (!canSubscribe(this._failure, key)) return;
     this._unsubscribe();
+    this._failure = null;
     this._subscriptionKey = key;
     this._data = null;
     try {
@@ -719,7 +726,10 @@ var NaolibAroundCard = class extends NaolibBaseCard {
       if (this._subscriptionKey === key) this._unsubscribeFn = unsubscribe;
       else unsubscribe();
     } catch (err) {
-      if (this._subscriptionKey === key) this._subscriptionKey = null;
+      if (this._subscriptionKey === key) {
+        this._subscriptionKey = null;
+        this._failure = { key, retryAt: Date.now() + SUBSCRIBE_RETRY_MS };
+      }
       console.error("Naolib around card: subscription failed", err);
       if (this.content) {
         this._message(

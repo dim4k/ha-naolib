@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { normalizeAroundConfig, prepareStops } from "../../src/around/config.js";
+import {
+    SUBSCRIBE_RETRY_MS,
+    canSubscribe,
+    normalizeAroundConfig,
+    prepareStops,
+} from "../../src/around/config.js";
 import {
     noStopsMessage,
     notLocatedMessage,
@@ -69,6 +74,28 @@ describe("normalizeAroundConfig", () => {
         expect(() => normalizeAroundConfig({ radius: 50 })).toThrow(/radius/);
         expect(() => normalizeAroundConfig({ max_stops: 0 })).toThrow(/max_stops/);
         expect(() => normalizeAroundConfig({ departures: 99 })).toThrow(/departures/);
+    });
+});
+
+describe("canSubscribe", () => {
+    const failure = { key: "person.me|500|5", retryAt: NOW + SUBSCRIBE_RETRY_MS };
+
+    it("subscribes when nothing failed", () => {
+        expect(canSubscribe(null, "person.me|500|5", NOW)).toBe(true);
+        expect(canSubscribe(undefined, "person.me|500|5", NOW)).toBe(true);
+    });
+
+    it("holds back the subscription that just failed", () => {
+        expect(canSubscribe(failure, "person.me|500|5", NOW)).toBe(false);
+        expect(canSubscribe(failure, "person.me|500|5", failure.retryAt - 1)).toBe(false);
+    });
+
+    it("tries it again once the delay is over", () => {
+        expect(canSubscribe(failure, "person.me|500|5", failure.retryAt)).toBe(true);
+    });
+
+    it("tries another configuration right away", () => {
+        expect(canSubscribe(failure, "person.me|800|5", NOW)).toBe(true);
     });
 });
 

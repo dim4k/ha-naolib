@@ -2,7 +2,12 @@ import { NaolibBaseCard } from "../base-card.js";
 import { firstLocatable } from "../entities.js";
 import { errorText, esc } from "../html.js";
 import { LOADING } from "../render/shared.js";
-import { normalizeAroundConfig, prepareStops } from "./config.js";
+import {
+    SUBSCRIBE_RETRY_MS,
+    canSubscribe,
+    normalizeAroundConfig,
+    prepareStops,
+} from "./config.js";
 import { noStopsMessage, notLocatedMessage, renderAround } from "./render.js";
 
 // Lists the stops around a person, zone or device tracker, nearest first,
@@ -49,13 +54,15 @@ export class NaolibAroundCard extends NaolibBaseCard {
         const entity = this.config.entity;
         if (!entity) {
             this._unsubscribe();
+            this._failure = null;
             this._message(this.constructor.noEntityMessage);
             return;
         }
         this._name = hass.states[entity]?.attributes?.friendly_name || entity;
         this._updateTitle(this.config.title || `Autour de ${this._name}`);
         this._subscribe();
-        if (!this._data) this._message(LOADING);
+        // A failure keeps its message up until the next attempt.
+        if (!this._data && !this._failure) this._message(LOADING);
     }
 
     // One subscription per entity, radius and number of stops; a new
@@ -65,8 +72,13 @@ export class NaolibAroundCard extends NaolibBaseCard {
         if (!this._hass || !this.isConnected || !entity) return;
         const key = `${entity}|${radius}|${maxStops}`;
         if (this._subscriptionKey === key) return;
+        // `hass` is set on every state change: a subscription that cannot
+        // succeed (integration not loaded, invalid entity) would otherwise be
+        // attempted again several times a second.
+        if (!canSubscribe(this._failure, key)) return;
 
         this._unsubscribe();
+        this._failure = null;
         this._subscriptionKey = key;
         this._data = null;
         try {
@@ -86,7 +98,10 @@ export class NaolibAroundCard extends NaolibBaseCard {
             if (this._subscriptionKey === key) this._unsubscribeFn = unsubscribe;
             else unsubscribe();
         } catch (err) {
-            if (this._subscriptionKey === key) this._subscriptionKey = null;
+            if (this._subscriptionKey === key) {
+                this._subscriptionKey = null;
+                this._failure = { key, retryAt: Date.now() + SUBSCRIBE_RETRY_MS };
+            }
             console.error("Naolib around card: subscription failed", err);
             if (this.content) {
                 this._message(
