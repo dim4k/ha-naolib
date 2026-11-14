@@ -115,7 +115,7 @@ var base = `
        the content. */
     :host { display: block; height: 100%; }
     ha-card { padding-bottom: 0; overflow: hidden; height: 100%; display: flex; flex-direction: column; box-sizing: border-box; }
-    #content { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--naolib-scroll-thumb) transparent; }
+    #content { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--naolib-scroll-thumb) transparent; }
     .card-header { padding: 16px; font-weight: bold; font-size: 1.2em; display: flex; align-items: center; }
     .icon { margin-right: 10px; color: var(--primary-color); }
     .badge { font-weight: bold; padding: 4px 8px; border-radius: 6px; min-width: 25px; text-align: center; margin-right: 12px; font-size: 1.1em; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
@@ -255,7 +255,7 @@ var timetable = `
     /* The negative margin compensates the padding, which keeps the grid aligned
        with the other sections while leaving room for the "now" ring and the
        last row at full scroll. */
-    .tt-hours { max-height: 380px; overflow-y: auto; overscroll-behavior: contain; position: relative; margin: 0 -4px; padding: 4px 12px 6px 4px; scrollbar-width: thin; scrollbar-color: var(--naolib-scroll-thumb) transparent; }
+    .tt-hours { max-height: 380px; overflow-y: auto; position: relative; margin: 0 -4px; padding: 4px 12px 6px 4px; scrollbar-width: thin; scrollbar-color: var(--naolib-scroll-thumb) transparent; }
     .tt-hours::-webkit-scrollbar { width: 8px; }
     .tt-hours::-webkit-scrollbar-track { background: transparent; }
     .tt-hours::-webkit-scrollbar-thumb { background: var(--naolib-scroll-thumb); border: 2px solid transparent; background-clip: content-box; border-radius: 4px; }
