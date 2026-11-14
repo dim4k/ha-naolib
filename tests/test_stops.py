@@ -58,3 +58,22 @@ def test_radius_still_caps_to_the_limit() -> None:
     places = [{"id": str(i), "lat": _LAT, "lon": _LON} for i in range(5)]
 
     assert len(nearest(places, _LAT, _LON, limit=2, radius=100)) == 2
+
+
+def test_nearest_leaves_the_places_untouched() -> None:
+    """The distance is added to copies, never to the catalog itself."""
+    places = [{"id": "near", "lat": _LAT, "lon": _LON}]
+
+    result = nearest(places, _LAT, _LON)
+
+    assert result == [{"id": "near", "lat": _LAT, "lon": _LON, "distance": 0}]
+    assert "distance" not in places[0]
+
+
+def test_nearest_keeps_the_catalog_order_between_equal_distances() -> None:
+    """Places at the same distance come out in the order they were given."""
+    places = [{"id": str(i), "lat": _LAT, "lon": _LON} for i in range(4)]
+
+    result = nearest(places, _LAT, _LON, limit=3)
+
+    assert [place["id"] for place in result] == ["0", "1", "2"]

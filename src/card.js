@@ -5,6 +5,7 @@ import { errorText } from "./html.js";
 import { renderDepartures } from "./render/departures.js";
 import { renderTimetable, renderTimetableHeader } from "./render/timetable.js";
 import { LOADING, message } from "./render/shared.js";
+import { TimetableCache } from "./timetable-cache.js";
 import {
     ATTR_DAY,
     ATTR_DIRECTION,
@@ -36,11 +37,7 @@ export class NaolibCard extends NaolibBaseCard {
     _directionByLine = new Map();
     _dayOffset = 0;
     // Timetables are fetched and cached per day browsed.
-    _schedulesByDay = new Map();
-    _fetchedDays = new Set();
-    _fetchingDays = new Set();
-    // Days past the end of the embedded calendar.
-    _expiredDays = new Set();
+    _timetables = new TimetableCache();
 
     static getConfigElement() {
         return document.createElement("naolib-card-editor");
@@ -84,9 +81,7 @@ export class NaolibCard extends NaolibBaseCard {
     }
 
     _resetScheduleState() {
-        this._schedulesByDay = new Map();
-        this._fetchedDays = new Set();
-        this._expiredDays = new Set();
+        this._timetables.clear();
         this._selectedLine = null;
         this._directionByLine = new Map();
         this._dayOffset = 0;
@@ -108,13 +103,11 @@ export class NaolibCard extends NaolibBaseCard {
         // Fetch the full timetable on demand, only when the schedule view
         // is opened, and once per day browsed.
         if (!this._hass || !this._state) return;
-        if (this._fetchedDays.has(dayOffset) || this._fetchingDays.has(dayOffset)) {
-            return;
-        }
         const stopCode = this._state.attributes.stop_code;
         if (!stopCode) return;
+        const settle = this._timetables.begin(dayOffset);
+        if (!settle) return;
 
-        this._fetchingDays.add(dayOffset);
         this._hass
             .callWS({
                 type: "naolib/timetable",
@@ -122,21 +115,16 @@ export class NaolibCard extends NaolibBaseCard {
                 day_offset: dayOffset,
             })
             .then((data) => {
-                this._schedulesByDay.set(dayOffset, data?.timetable || {});
-                if (data?.expired) this._expiredDays.add(dayOffset);
-                this._fetchedDays.add(dayOffset);
-                if (this._showSchedule) this._render();
+                // An answer for a stop or a day since dropped is ignored.
+                if (settle(data ?? {}) && this._showSchedule) this._render();
             })
             .catch((err) => {
                 console.error("Error fetching Naolib schedules:", err);
-                if (this._showSchedule) {
+                if (settle() && this._showSchedule) {
                     this.content.innerHTML = `${renderTimetableHeader()}${message(
                         `Erreur de chargement des horaires : ${errorText(err)}`,
                     )}`;
                 }
-            })
-            .finally(() => {
-                this._fetchingDays.delete(dayOffset);
             });
     }
 
@@ -214,11 +202,13 @@ export class NaolibCard extends NaolibBaseCard {
 
         const config = this.config;
         if (this._showSchedule) {
+            // Past midnight "today" is another day: fetch it again.
+            if (this._timetables.rollover()) this._fetchSchedules(this._dayOffset);
             this._setContent(
                 renderTimetable({
-                    schedules: this._schedulesByDay.get(this._dayOffset) || {},
-                    fetched: this._fetchedDays.has(this._dayOffset),
-                    expired: this._expiredDays.has(this._dayOffset),
+                    schedules: this._timetables.timetable(this._dayOffset),
+                    fetched: this._timetables.isFetched(this._dayOffset),
+                    expired: this._timetables.isExpired(this._dayOffset),
                     config,
                     selectedLine: this._selectedLine,
                     directionByLine: this._directionByLine,

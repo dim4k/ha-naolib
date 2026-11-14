@@ -1,6 +1,7 @@
 """Tests for the entry lifecycle and the get_departures action."""
 
-from datetime import timedelta
+import asyncio
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from homeassistant.config_entries import ConfigEntryState
@@ -11,6 +12,7 @@ from homeassistant.helpers import (
     entity_registry as er,
     issue_registry as ir,
 )
+from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -33,6 +35,8 @@ from custom_components.naolib.const import (
     SERVICE_GET_DEPARTURES,
 )
 from custom_components.naolib.diagnostics import async_get_config_entry_diagnostics
+from custom_components.naolib.schedules import service_day
+from custom_components.naolib.stops import load_stops
 
 
 @pytest.fixture(autouse=True)
@@ -81,6 +85,67 @@ async def _setup(hass: HomeAssistant, entry: MockConfigEntry) -> None:
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
+
+
+async def test_entries_set_up_together_share_one_request(hass: HomeAssistant) -> None:
+    """Starting with several stops calls the rate-limited endpoint only once."""
+    for stop_code, quay in (("STOP1", "QUAY1"), ("STOP2", "QUAY2"), ("STOP3", "QUAY3")):
+        _entry(stop_code, quay).add_to_hass(hass)
+    calls = 0
+
+    async def fetch(*_args: object) -> dict[str, list[dict[str, str]]]:
+        nonlocal calls
+        calls += 1
+        # The request leaves the event loop: the other entries are set up
+        # before its answer comes back.
+        await asyncio.sleep(0)
+        return {**_network("QUAY1"), **_network("QUAY2"), **_network("QUAY3")}
+
+    with (
+        patch(
+            "custom_components.naolib.coordinator.NaolibApiClient"
+            ".async_get_all_departures",
+            side_effect=fetch,
+        ),
+        patch("custom_components.naolib.coordinator.last_departures", return_value={}),
+    ):
+        assert await async_setup_component(hass, DOMAIN, {})
+        await hass.async_block_till_done()
+
+    assert calls == 1
+    for stop in ("stop1", "stop2", "stop3"):
+        state = hass.states.get(f"sensor.stop_label_{stop}_next_departures")
+        assert state is not None
+        assert len(state.attributes["next_departures"]) == 1
+    hass.data[DOMAIN].departures._cancel_deferred()
+
+
+async def test_reconfigure_reloads_the_entry_once(hass: HomeAssistant) -> None:
+    """A reconfigured entry is set up again once, not once per reload mechanism."""
+    entry = _entry()
+    await _setup(hass, entry)
+    coordinator = hass.data[DOMAIN].departures
+    target = load_stops()[0]
+
+    with (
+        patch.object(coordinator.api, "async_get_all_departures", return_value={}),
+        patch("custom_components.naolib.coordinator.last_departures", return_value={}),
+        patch.object(coordinator, "register", wraps=coordinator.register) as register,
+    ):
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"next_step_id": "by_list"}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_STOP_CODE: target["id"]}
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.state is ConfigEntryState.LOADED
+    assert coordinator.tracked[entry.entry_id].code == target["id"]
+    assert register.call_count == 1
+    coordinator._cancel_deferred()
 
 
 async def test_setup_and_unload(hass: HomeAssistant) -> None:
@@ -255,10 +320,33 @@ async def test_websocket_serves_the_timetable_of_a_following_day(
         )
         response = await client.receive_json()
 
-    expected = dt_util.now().date() + timedelta(days=2)
+    expected = service_day(dt_util.now()) + timedelta(days=2)
     assert response["success"]
     assert response["result"]["date"] == expected.isoformat()
     assert build_timetable.call_args.args[1] == expected
+
+
+async def test_websocket_serves_the_day_before_in_the_small_hours(
+    hass: HomeAssistant, hass_ws_client, freezer
+) -> None:
+    """Past midnight, "today" is still the service day that has not ended."""
+    await _setup(hass, _entry())
+    client = await hass_ws_client(hass)
+    freezer.move_to(
+        datetime(2026, 11, 15, 1, 30, tzinfo=dt_util.get_default_time_zone())
+    )
+
+    with patch(
+        "custom_components.naolib.build_timetable", return_value={}
+    ) as build_timetable:
+        await client.send_json_auto_id(
+            {"type": "naolib/timetable", "stop_code": "STOP1"}
+        )
+        response = await client.receive_json()
+
+    assert response["success"]
+    assert response["result"]["date"] == "2026-11-14"
+    assert build_timetable.call_args.args[1].isoformat() == "2026-11-14"
 
 
 async def test_websocket_flags_days_past_the_embedded_calendar(
@@ -267,7 +355,7 @@ async def test_websocket_flags_days_past_the_embedded_calendar(
     """Stale timetables are reported, not passed off as a day without service."""
     await _setup(hass, _entry())
     client = await hass_ws_client(hass)
-    yesterday = dt_util.now().date() - timedelta(days=1)
+    yesterday = service_day(dt_util.now()) - timedelta(days=1)
 
     with (
         patch("custom_components.naolib.build_timetable", return_value={}),

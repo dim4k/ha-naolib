@@ -24,7 +24,7 @@ from homeassistant.util import dt as dt_util
 
 from .api import NaolibApiClient
 from .const import API_MIN_SPACING, DEFAULT_UPDATE_INTERVAL, DOMAIN
-from .schedules import last_departures
+from .schedules import last_departures, service_day
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -181,11 +181,14 @@ class NaolibDeparturesCoordinator(NaolibSharedCoordinator[NaolibStop, Departures
             (stop for stop in self.tracked.values() if stop.code == stop_code), None
         )
 
+    def _wanted_quays(self) -> set[str] | None:
+        """Return the quays of every stop served; None (all) without any."""
+        return {quay for stop in self.tracked.values() for quay in stop.quays} or None
+
     async def _async_update_data(self) -> Departures:
         """Fetch the whole network once."""
-        wanted = {quay for stop in self.tracked.values() for quay in stop.quays}
         self._last_fetch = time.monotonic()
-        data = await self.api.async_get_all_departures(wanted or None)
+        data = await self.api.async_get_all_departures(self._wanted_quays)
         if data is None:
             return self._serve_last_snapshot()
 
@@ -197,9 +200,10 @@ class NaolibDeparturesCoordinator(NaolibSharedCoordinator[NaolibStop, Departures
         """Recompute each stop's last scheduled departures when the day changes.
 
         The "last passage of the day" flag then follows the GTFS service
-        calendar automatically.
+        calendar automatically. The day is the service day: past midnight the
+        last departures are still those of the day before.
         """
-        today = dt_util.now().date()
+        today = service_day(dt_util.now())
         # Snapshot: a config entry may be set up or removed while we await.
         for stop in list(self.tracked.values()):
             if stop.last_times_date == today:

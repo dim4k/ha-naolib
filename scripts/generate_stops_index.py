@@ -52,7 +52,11 @@ CALENDAR_PATH = _DATA_DIR / "calendar.json"
 
 # Bumped whenever the stored payload changes shape. Reported in the integration
 # diagnostics along with the generation date.
-SCHEDULES_FORMAT_VERSION = "1"
+SCHEDULES_FORMAT_VERSION = "2"
+
+# The refresh is released without review: a feed that lost more than this
+# share of its stations is taken for a broken export rather than shipped.
+MIN_KEPT_RATIO = 0.8
 
 _WEEKDAYS = (
     "monday",
@@ -165,8 +169,9 @@ def build_schedules(
 ) -> dict[str, dict]:
     """Build per-station theoretical timetables from the GTFS feed.
 
-    Returns ``{station_id: {group_key: {line, direction, destination,
-    services: {service_id: [HHMM, ...]}}}}``.
+    Returns ``{station_id: {group_key: {line, destination,
+    services: {service_id: [HHMM, ...]}}}}``. The group key is
+    ``"{line}|{direction}"``, the only place the direction is carried.
     """
     routes = {
         row["route_id"]: (row.get("route_short_name") or row.get("route_id") or "")
@@ -207,7 +212,6 @@ def build_schedules(
             group_key,
             {
                 "line": line,
-                "direction": direction,
                 "headsigns": Counter(),
                 "services": {},
             },
@@ -225,7 +229,6 @@ def build_schedules(
             destination = headsigns.most_common(1)[0][0] if headsigns else ""
             out_groups[group_key] = {
                 "line": group["line"],
-                "direction": group["direction"],
                 "destination": destination,
                 "services": {
                     service_id: sorted(times)
@@ -289,6 +292,33 @@ def _write_json(path: Path, data) -> None:
         fh.write("\n")
 
 
+def stored_schedules(path: Path) -> dict[str, dict] | None:
+    """Return the timetables a database holds, None when they cannot be reused.
+
+    The database carries its generation date, so writing it again always
+    changes the file: comparing what it holds is what tells a refresh that
+    brought nothing new, which is then not worth a release.
+    """
+    if not path.exists():
+        return None
+    try:
+        connection = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            meta = dict(connection.execute("SELECT key, value FROM meta"))
+            if meta.get("format_version") != SCHEDULES_FORMAT_VERSION:
+                return None
+            return {
+                station: json.loads(zlib.decompress(payload))
+                for station, payload in connection.execute(
+                    "SELECT station_id, payload FROM station_schedules"
+                )
+            }
+        finally:
+            connection.close()
+    except (sqlite3.Error, zlib.error, ValueError):
+        return None
+
+
 def _write_schedules(path: Path, schedules: dict[str, dict]) -> None:
     """Write the timetables as one compressed row per station.
 
@@ -343,27 +373,84 @@ def _write_schedules(path: Path, schedules: dict[str, dict]) -> None:
         connection.close()
 
 
+def _previous_station_count() -> int:
+    """Return how many stations the shipped index holds, 0 if there is none."""
+    try:
+        with OUTPUT_PATH.open(encoding="utf-8") as fh:
+            return len(json.load(fh))
+    except (OSError, ValueError):
+        return 0
+
+
+def check_feed(
+    index: list[dict],
+    schedules: dict[str, dict],
+    calendar: dict[str, dict],
+    *,
+    previous_stations: int,
+    today: str,
+) -> None:
+    """Refuse a feed that would ship empty, truncated or expired data.
+
+    ``today`` is a ``YYYYMMDD`` date, like the ones of the calendar.
+    """
+    if not index:
+        raise RuntimeError("The GTFS feed holds no station")
+    if len(index) < previous_stations * MIN_KEPT_RATIO:
+        raise RuntimeError(
+            f"The GTFS feed holds {len(index)} stations, down from "
+            f"{previous_stations}: it looks truncated"
+        )
+    if len(schedules) < len(index) * MIN_KEPT_RATIO:
+        raise RuntimeError(
+            f"Only {len(schedules)} of the {len(index)} stations have a timetable"
+        )
+    end = max(
+        (
+            date
+            for info in calendar.values()
+            for date in (info.get("end", ""), *info.get("added", []))
+        ),
+        default="",
+    )
+    if end < today:
+        raise RuntimeError(
+            f"The GTFS calendar ends on {end or 'no date'}: every day would be empty"
+        )
+
+
 def main() -> None:
     """Download the GTFS feed and regenerate every embedded data file."""
     zip_url = _resolve_gtfs_url()
     archive = _download_archive(zip_url)
 
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-
     with zipfile.ZipFile(io.BytesIO(archive)) as zf:
         rows = _read_member(zf, "stops.txt")
         index = build_index(rows)
-        _write_json(OUTPUT_PATH, index)
-        print(f"Wrote {len(index)} stations to {OUTPUT_PATH}")
-
-        quay_to_station = build_quay_to_station(rows)
-        schedules = build_schedules(zf, quay_to_station)
+        schedules = build_schedules(zf, build_quay_to_station(rows))
         calendar = build_calendar(zf)
 
     # Drop stations that ended up without any timetable.
     schedules = {station: groups for station, groups in schedules.items() if groups}
-    _write_schedules(SCHEDULES_PATH, schedules)
-    print(f"Wrote {len(schedules)} station timetables to {SCHEDULES_PATH}")
+
+    # Nothing is written before the whole feed is known to be sound.
+    check_feed(
+        index,
+        schedules,
+        calendar,
+        previous_stations=_previous_station_count(),
+        today=datetime.now(UTC).strftime("%Y%m%d"),
+    )
+
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _write_json(OUTPUT_PATH, index)
+    print(f"Wrote {len(index)} stations to {OUTPUT_PATH}")
+
+    if stored_schedules(SCHEDULES_PATH) == schedules:
+        print(f"Timetables unchanged, kept {SCHEDULES_PATH}")
+    else:
+        _write_schedules(SCHEDULES_PATH, schedules)
+        print(f"Wrote {len(schedules)} station timetables to {SCHEDULES_PATH}")
 
     _write_json(CALENDAR_PATH, calendar)
     print(f"Wrote {len(calendar)} services to {CALENDAR_PATH}")

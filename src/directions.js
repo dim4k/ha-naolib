@@ -2,7 +2,7 @@
 // their terminus instead, per line, since direction 1 of one line has nothing
 // to do with direction 1 of another.
 
-const byLine = (a, b) => a.localeCompare(b, undefined, { numeric: true });
+import { compareLines } from "./lines.js";
 
 // Collect the terminus of each line, per direction, from the stop's timetable
 // (keyed "line|direction") and from its next departures, which also cover a
@@ -36,7 +36,7 @@ export function directionLabel(termini, direction) {
     const lines = termini[direction];
     if (!lines?.size) return `Direction ${direction}`;
     const linesByTerminus = new Map();
-    for (const line of [...lines.keys()].sort(byLine)) {
+    for (const line of [...lines.keys()].sort(compareLines)) {
         const terminus = [...lines.get(line)].sort().join(" / ");
         if (!linesByTerminus.has(terminus)) linesByTerminus.set(terminus, []);
         linesByTerminus.get(terminus).push(line);

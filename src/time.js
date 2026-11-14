@@ -37,18 +37,26 @@ export function relativeDay(offset) {
     return `Dans ${offset} jours`;
 }
 
-// Resolve an "HH:MM" timetable slot to an absolute date. Slots before the
-// service-day cutoff belong to the next calendar day, unless the current time
-// is itself in those small hours.
-export function passageDate(now, hour, minute) {
-    const reference = new Date(now);
+// The service day a moment belongs to (mirrors the backend): the small hours
+// are the tail of the day before. Only the date of the result is meaningful.
+export function serviceDay(now) {
     const date = new Date(now);
+    date.setHours(date.getHours() - SERVICE_DAY_CUTOFF_HOUR);
+    return date;
+}
+
+// Resolve an "HH:MM" slot of today's service day to an absolute date. The
+// slots before the cutoff fall on the calendar day after the others: on the
+// next one seen from the daytime, while seen from the small hours it is the
+// daytime slots that fall on the day before.
+export function passageDate(now, hour, minute) {
+    const date = new Date(now);
+    const smallHours = date.getHours() < SERVICE_DAY_CUTOFF_HOUR;
     date.setHours(hour, minute, 0, 0);
-    if (
-        hour < SERVICE_DAY_CUTOFF_HOUR &&
-        reference.getHours() >= SERVICE_DAY_CUTOFF_HOUR
-    ) {
+    if (hour < SERVICE_DAY_CUTOFF_HOUR && !smallHours) {
         date.setDate(date.getDate() + 1);
+    } else if (hour >= SERVICE_DAY_CUTOFF_HOUR && smallHours) {
+        date.setDate(date.getDate() - 1);
     }
     return date;
 }

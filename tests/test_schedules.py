@@ -1,7 +1,7 @@
 """Tests for the embedded GTFS timetables."""
 
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime
 import sqlite3
 from unittest.mock import MagicMock, patch
 
@@ -12,13 +12,11 @@ from custom_components.naolib import schedules
 _GROUPS = {
     "C3|1": {
         "line": "C3",
-        "direction": 1,
         "destination": "Hôtel Dieu",
         "services": {"S1": ["0730", "0745"], "S2": ["2350"], "S3": ["0010"]},
     },
     "2|2": {
         "line": "2",
-        "direction": 2,
         "destination": "",
         "services": {"S1": ["0800"]},
     },
@@ -50,7 +48,7 @@ def test_load_station_timetable_returns_trips() -> None:
 
     assert timetable
     first = next(iter(timetable.values()))
-    assert {"line", "direction", "destination", "services"} <= set(first)
+    assert {"line", "destination", "services"} <= set(first)
 
 
 def test_load_station_timetable_unknown_station() -> None:
@@ -131,6 +129,16 @@ def test_calendar_end_without_calendar() -> None:
     """No calendar shipped means no known end either."""
     with patch.object(schedules, "load_calendar", return_value={}):
         assert schedules.calendar_end() is None
+
+
+def test_service_day_counts_the_small_hours_as_the_day_before() -> None:
+    """A service day runs until the cutoff of the next calendar day."""
+    assert schedules.service_day(datetime(2026, 11, 16, 23, 59)) == date(2026, 11, 16)
+    assert schedules.service_day(datetime(2026, 11, 17, 0, 0)) == date(2026, 11, 16)
+    assert schedules.service_day(datetime(2026, 11, 17, 3, 59)) == date(2026, 11, 16)
+    assert schedules.service_day(datetime(2026, 11, 17, 4, 0)) == date(2026, 11, 17)
+    # Across a month.
+    assert schedules.service_day(datetime(2026, 12, 1, 1, 0)) == date(2026, 11, 30)
 
 
 def test_last_departures_wraps_past_midnight() -> None:

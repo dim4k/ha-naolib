@@ -1,6 +1,6 @@
 import { esc } from "../html.js";
 import { matchesFilters } from "../config.js";
-import { lineBadge } from "../lines.js";
+import { compareLines, lineBadge } from "../lines.js";
 import { message } from "./shared.js";
 import {
     formatClock,
@@ -8,6 +8,7 @@ import {
     humanizeSeconds,
     passageDate,
     relativeDay,
+    serviceDay,
     serviceHourKey,
 } from "../time.js";
 import {
@@ -56,9 +57,7 @@ export function groupSchedules(schedules, config) {
     }
 
     return [...byLine.values()]
-        .sort((a, b) =>
-            String(a.line).localeCompare(String(b.line), undefined, { numeric: true }),
-        )
+        .sort((a, b) => compareLines(a.line, b.line))
         .map((group) => ({
             ...group,
             directions: group.directions.sort((a, b) => a.direction - b.direction),
@@ -191,7 +190,8 @@ function renderNext(times, now, next, live) {
 }
 
 function renderDays(dayOffset, now) {
-    const date = new Date(now);
+    // Days are service days: in the small hours "today" is still yesterday's.
+    const date = serviceDay(now);
     date.setDate(date.getDate() + dayOffset);
     const nav = (offset, label, iconName, disabled) =>
         `<button type="button" class="tt-day-nav" ${ATTR_DAY}="${offset}" aria-label="${label}"${disabled ? " disabled" : ""}><ha-icon icon="mdi:chevron-${iconName}"></ha-icon></button>`;

@@ -139,21 +139,14 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is None:
             return self.async_show_form(step_id="bike_by_location", data_schema=schema)
 
-        location = user_input[CONF_LOCATION]
-        errors: dict[str, str] = {}
-        stations = await async_fetch_voi_stations(self.hass)
-        if stations is None:
-            errors["base"] = "cannot_connect"
-        else:
-            self._stations = nearest(
-                stations, location["latitude"], location["longitude"]
-            )
-            if self._stations:
-                return await self.async_step_select_station()
-            errors["base"] = "no_stations_found"
+        self._stations, error = await async_voi_stations_near(
+            self.hass, user_input[CONF_LOCATION]
+        )
+        if error is None:
+            return await self.async_step_select_station()
 
         return self.async_show_form(
-            step_id="bike_by_location", data_schema=schema, errors=errors
+            step_id="bike_by_location", data_schema=schema, errors={"base": error}
         )
 
     async def async_step_select_station(
@@ -246,9 +239,16 @@ class NaolibConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     and entry.unique_id == unique_id
                 ):
                     return self.async_abort(reason="already_configured")
-            return self.async_update_reload_and_abort(
+            changed = self.hass.config_entries.async_update_entry(
                 reconfigure_entry, title=title, unique_id=unique_id, data=data
             )
+            # A loaded entry is reloaded by its update listener as soon as it
+            # changes: reloading it here as well would set it up twice.
+            if not changed or not reconfigure_entry.update_listeners:
+                self.hass.config_entries.async_schedule_reload(
+                    reconfigure_entry.entry_id
+                )
+            return self.async_abort(reason="reconfigure_successful")
 
         self._abort_if_unique_id_configured()
         return self.async_create_entry(title=title, data=data)
@@ -330,6 +330,21 @@ async def async_fetch_voi_stations(hass: HomeAssistant) -> list[dict[str, Any]] 
     except GbfsUnavailableError:
         _LOGGER.warning("The Voi GBFS feed could not be reached")
         return None
+
+
+async def async_voi_stations_near(
+    hass: HomeAssistant, location: dict[str, float]
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Search the Voi spots around a location picked on the map.
+
+    Returns the spots, nearest first, and the error to show when there is
+    none to choose from.
+    """
+    stations = await async_fetch_voi_stations(hass)
+    if stations is None:
+        return [], "cannot_connect"
+    found = nearest(stations, location["latitude"], location["longitude"])
+    return found, None if found else "no_stations_found"
 
 
 def voi_station_entry(station: dict[str, Any]) -> dict[str, Any]:

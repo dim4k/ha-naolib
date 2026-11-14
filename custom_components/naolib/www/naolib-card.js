@@ -115,7 +115,7 @@ var base = `
        the content. */
     :host { display: block; height: 100%; }
     ha-card { padding-bottom: 0; overflow: hidden; height: 100%; display: flex; flex-direction: column; box-sizing: border-box; }
-    #content { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--naolib-scroll-thumb) transparent; }
+    #content { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--naolib-scroll-thumb) transparent; }
     .card-header { padding: 16px; font-weight: bold; font-size: 1.2em; display: flex; align-items: center; }
     .icon { margin-right: 10px; color: var(--primary-color); }
     .badge { font-weight: bold; padding: 4px 8px; border-radius: 6px; min-width: 25px; text-align: center; margin-right: 12px; font-size: 1.1em; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
@@ -255,7 +255,7 @@ var timetable = `
     /* The negative margin compensates the padding, which keeps the grid aligned
        with the other sections while leaving room for the "now" ring and the
        last row at full scroll. */
-    .tt-hours { max-height: 380px; overflow-y: auto; overscroll-behavior: contain; position: relative; margin: 0 -4px; padding: 4px 12px 6px 4px; scrollbar-width: thin; scrollbar-color: var(--naolib-scroll-thumb) transparent; }
+    .tt-hours { max-height: 380px; overflow-y: auto; position: relative; margin: 0 -4px; padding: 4px 12px 6px 4px; scrollbar-width: thin; scrollbar-color: var(--naolib-scroll-thumb) transparent; }
     .tt-hours::-webkit-scrollbar { width: 8px; }
     .tt-hours::-webkit-scrollbar-track { background: transparent; }
     .tt-hours::-webkit-scrollbar-thumb { background: var(--naolib-scroll-thumb); border: 2px solid transparent; background-clip: content-box; border-radius: 4px; }
@@ -458,6 +458,10 @@ var MIN_RADIUS = 100;
 var MAX_RADIUS = 3e3;
 var MAX_STOPS = 15;
 var MAX_DEPARTURES = 10;
+var SUBSCRIBE_RETRY_MS = 3e4;
+function canSubscribe(failure, key, now = Date.now()) {
+  return !failure || failure.key !== key || now >= failure.retryAt;
+}
 var check = configValidator("naolib-around-card");
 function normalizeAroundConfig(config) {
   const raw = check.base(config, DEFAULT_AROUND_CONFIG);
@@ -571,6 +575,9 @@ var MODE_LABELS = {
   3: "Bus",
   4: "Navibus"
 };
+function compareLines(a, b) {
+  return String(a).localeCompare(String(b), void 0, { numeric: true });
+}
 function lineColors(line) {
   return LINE_COLORS[String(line).toUpperCase()] || FALLBACK;
 }
@@ -612,12 +619,19 @@ function relativeDay(offset) {
   if (offset === 2) return "Après-demain";
   return `Dans ${offset} jours`;
 }
-function passageDate(now, hour, minute) {
-  const reference = new Date(now);
+function serviceDay(now) {
   const date = new Date(now);
+  date.setHours(date.getHours() - SERVICE_DAY_CUTOFF_HOUR);
+  return date;
+}
+function passageDate(now, hour, minute) {
+  const date = new Date(now);
+  const smallHours = date.getHours() < SERVICE_DAY_CUTOFF_HOUR;
   date.setHours(hour, minute, 0, 0);
-  if (hour < SERVICE_DAY_CUTOFF_HOUR && reference.getHours() >= SERVICE_DAY_CUTOFF_HOUR) {
+  if (hour < SERVICE_DAY_CUTOFF_HOUR && !smallHours) {
     date.setDate(date.getDate() + 1);
+  } else if (hour >= SERVICE_DAY_CUTOFF_HOUR && smallHours) {
+    date.setDate(date.getDate() - 1);
   }
   return date;
 }
@@ -684,13 +698,14 @@ var NaolibAroundCard = class extends NaolibBaseCard {
     const entity = this.config.entity;
     if (!entity) {
       this._unsubscribe();
+      this._failure = null;
       this._message(this.constructor.noEntityMessage);
       return;
     }
     this._name = hass.states[entity]?.attributes?.friendly_name || entity;
     this._updateTitle(this.config.title || `Autour de ${this._name}`);
     this._subscribe();
-    if (!this._data) this._message(LOADING);
+    if (!this._data && !this._failure) this._message(LOADING);
   }
   // One subscription per entity, radius and number of stops; a new
   // configuration replaces it.
@@ -699,7 +714,9 @@ var NaolibAroundCard = class extends NaolibBaseCard {
     if (!this._hass || !this.isConnected || !entity) return;
     const key = `${entity}|${radius}|${maxStops}`;
     if (this._subscriptionKey === key) return;
+    if (!canSubscribe(this._failure, key)) return;
     this._unsubscribe();
+    this._failure = null;
     this._subscriptionKey = key;
     this._data = null;
     try {
@@ -719,7 +736,10 @@ var NaolibAroundCard = class extends NaolibBaseCard {
       if (this._subscriptionKey === key) this._unsubscribeFn = unsubscribe;
       else unsubscribe();
     } catch (err) {
-      if (this._subscriptionKey === key) this._subscriptionKey = null;
+      if (this._subscriptionKey === key) {
+        this._subscriptionKey = null;
+        this._failure = { key, retryAt: Date.now() + SUBSCRIBE_RETRY_MS };
+      }
       console.error("Naolib around card: subscription failed", err);
       if (this.content) {
         this._message(
@@ -953,7 +973,6 @@ function prepareDepartures(departures2, config, now = Date.now()) {
 }
 
 // src/directions.js
-var byLine = (a, b) => a.localeCompare(b, void 0, { numeric: true });
 function directionTermini(schedules, departures2, lines = []) {
   const wanted = new Set(lines.map(String));
   const termini = { 1: /* @__PURE__ */ new Map(), 2: /* @__PURE__ */ new Map() };
@@ -979,7 +998,7 @@ function directionLabel(termini, direction) {
   const lines = termini[direction];
   if (!lines?.size) return `Direction ${direction}`;
   const linesByTerminus = /* @__PURE__ */ new Map();
-  for (const line of [...lines.keys()].sort(byLine)) {
+  for (const line of [...lines.keys()].sort(compareLines)) {
     const terminus = [...lines.get(line)].sort().join(" / ");
     if (!linesByTerminus.has(terminus)) linesByTerminus.set(terminus, []);
     linesByTerminus.get(terminus).push(line);
@@ -995,15 +1014,20 @@ function directionHeading(departures2, direction) {
 }
 
 // src/render/departures.js
-function clocksHtml(item) {
+function departureClock(item) {
   const expected = Date.parse(item.expected_ts);
-  if (Number.isNaN(expected)) return "";
-  const real = formatClock(new Date(expected));
+  return Number.isNaN(expected) ? "" : formatClock(new Date(expected));
+}
+function clocksHtml(item) {
+  const real = departureClock(item);
+  if (!real) return "";
   const delay = item.delay_minutes;
   if (typeof delay !== "number" || Math.abs(delay) < DELAY_TOLERANCE_MINUTES) {
     return `<span class="clock strong">${real}</span>`;
   }
-  const aimed = formatClock(new Date(expected - delay * MS_PER_MINUTE));
+  const aimed = formatClock(
+    new Date(Date.parse(item.expected_ts) - delay * MS_PER_MINUTE)
+  );
   const state = delay > 0 ? "late" : "early";
   const title = delay > 0 ? `${delay} min de retard sur l'horaire théorique` : `${-delay} min d'avance sur l'horaire théorique`;
   return `<span class="clock aimed">${aimed}</span><span class="clock strong ${state}" title="${title}">${real}</span>`;
@@ -1024,9 +1048,8 @@ function tileRow(departure, timesHtml) {
     `;
 }
 function nextClock(item) {
-  const expected = Date.parse(item.expected_ts);
-  if (Number.isNaN(expected)) return "";
-  const clock = formatClock(new Date(expected));
+  const clock = departureClock(item);
+  if (!clock) return "";
   return `<span class="clock${isLate(item) ? " late" : ""}">${clock}</span>`;
 }
 function stripHtml(first, second) {
@@ -1050,8 +1073,8 @@ function tileHtml(first, second) {
     `;
 }
 function compactTileHtml(departure) {
-  const expected = Date.parse(departure.expected_ts);
-  const title = Number.isNaN(expected) ? "" : ` title="${formatClock(new Date(expected))}"`;
+  const clock = departureClock(departure);
+  const title = clock ? ` title="${clock}"` : "";
   const mark = departure.is_last ? `<span class="mark">dernier</span>` : "";
   const countdown = `<div class="${timeClass(departure.minutes)}"${title}>${esc(departure.time)}</div>`;
   return `<div class="tile">${tileRow(departure, `${mark}${countdown}`)}</div>`;
@@ -1109,14 +1132,14 @@ function renderTimetableHeader(extra = "") {
     `;
 }
 function groupSchedules(schedules, config) {
-  const byLine2 = /* @__PURE__ */ new Map();
+  const byLine = /* @__PURE__ */ new Map();
   for (const key of Object.keys(schedules || {})) {
     const [line, direction] = key.split("|");
     if (!matchesFilters(line, direction, config)) continue;
     const data = schedules[key];
     if (!data) continue;
-    if (!byLine2.has(line)) byLine2.set(line, { line, directions: [] });
-    byLine2.get(line).directions.push({
+    if (!byLine.has(line)) byLine.set(line, { line, directions: [] });
+    byLine.get(line).directions.push({
       key,
       line,
       direction: Number(direction),
@@ -1124,9 +1147,7 @@ function groupSchedules(schedules, config) {
       times: data.times || {}
     });
   }
-  return [...byLine2.values()].sort(
-    (a, b) => String(a.line).localeCompare(String(b.line), void 0, { numeric: true })
-  ).map((group) => ({
+  return [...byLine.values()].sort((a, b) => compareLines(a.line, b.line)).map((group) => ({
     ...group,
     directions: group.directions.sort((a, b) => a.direction - b.direction)
   }));
@@ -1227,7 +1248,7 @@ function renderNext(times, now, next, live) {
     `;
 }
 function renderDays(dayOffset, now) {
-  const date = new Date(now);
+  const date = serviceDay(now);
   date.setDate(date.getDate() + dayOffset);
   const nav = (offset, label, iconName, disabled) => `<button type="button" class="tt-day-nav" ${ATTR_DAY}="${offset}" aria-label="${label}"${disabled ? " disabled" : ""}><ha-icon icon="mdi:chevron-${iconName}"></ha-icon></button>`;
   return `
@@ -1306,6 +1327,63 @@ function renderTimetable({
   ].join("");
 }
 
+// src/timetable-cache.js
+var TimetableCache = class {
+  constructor() {
+    this._day = null;
+    this._generation = 0;
+    this._empty();
+  }
+  _empty() {
+    this._timetables = /* @__PURE__ */ new Map();
+    this._expired = /* @__PURE__ */ new Set();
+    this._fetching = /* @__PURE__ */ new Set();
+  }
+  // Forget everything: the stop changed.
+  clear() {
+    this._generation += 1;
+    this._empty();
+  }
+  // Forget everything once the service day has changed since the last
+  // call. Returns whether anything had to be dropped.
+  rollover(now = /* @__PURE__ */ new Date()) {
+    const day = serviceDay(now).toDateString();
+    if (this._day === day) return false;
+    const stale = this._day !== null;
+    this._day = day;
+    if (stale) this.clear();
+    return stale;
+  }
+  timetable(offset) {
+    return this._timetables.get(offset) || {};
+  }
+  isFetched(offset) {
+    return this._timetables.has(offset);
+  }
+  // Whether the day lies past the end of the embedded calendar.
+  isExpired(offset) {
+    return this._expired.has(offset);
+  }
+  // Start fetching a day, unless it is already known or on its way. Returns
+  // the function settling the request: called with the answer, or with
+  // nothing when the request failed. It returns false when the answer came
+  // too late to be used.
+  begin(offset) {
+    if (this._timetables.has(offset) || this._fetching.has(offset)) return null;
+    this._fetching.add(offset);
+    const generation = this._generation;
+    return (data) => {
+      if (generation !== this._generation) return false;
+      this._fetching.delete(offset);
+      if (data !== void 0) {
+        this._timetables.set(offset, data?.timetable || {});
+        if (data?.expired) this._expired.add(offset);
+      }
+      return true;
+    };
+  }
+};
+
 // src/card.js
 var NaolibCard = class extends NaolibBaseCard {
   constructor() {
@@ -1316,11 +1394,7 @@ var NaolibCard = class extends NaolibBaseCard {
     __publicField(this, "_directionByLine", /* @__PURE__ */ new Map());
     __publicField(this, "_dayOffset", 0);
     // Timetables are fetched and cached per day browsed.
-    __publicField(this, "_schedulesByDay", /* @__PURE__ */ new Map());
-    __publicField(this, "_fetchedDays", /* @__PURE__ */ new Set());
-    __publicField(this, "_fetchingDays", /* @__PURE__ */ new Set());
-    // Days past the end of the embedded calendar.
-    __publicField(this, "_expiredDays", /* @__PURE__ */ new Set());
+    __publicField(this, "_timetables", new TimetableCache());
   }
   static getConfigElement() {
     return document.createElement("naolib-card-editor");
@@ -1355,9 +1429,7 @@ var NaolibCard = class extends NaolibBaseCard {
     return true;
   }
   _resetScheduleState() {
-    this._schedulesByDay = /* @__PURE__ */ new Map();
-    this._fetchedDays = /* @__PURE__ */ new Set();
-    this._expiredDays = /* @__PURE__ */ new Set();
+    this._timetables.clear();
     this._selectedLine = null;
     this._directionByLine = /* @__PURE__ */ new Map();
     this._dayOffset = 0;
@@ -1371,30 +1443,23 @@ var NaolibCard = class extends NaolibBaseCard {
   }
   _fetchSchedules(dayOffset) {
     if (!this._hass || !this._state) return;
-    if (this._fetchedDays.has(dayOffset) || this._fetchingDays.has(dayOffset)) {
-      return;
-    }
     const stopCode = this._state.attributes.stop_code;
     if (!stopCode) return;
-    this._fetchingDays.add(dayOffset);
+    const settle = this._timetables.begin(dayOffset);
+    if (!settle) return;
     this._hass.callWS({
       type: "naolib/timetable",
       stop_code: stopCode,
       day_offset: dayOffset
     }).then((data) => {
-      this._schedulesByDay.set(dayOffset, data?.timetable || {});
-      if (data?.expired) this._expiredDays.add(dayOffset);
-      this._fetchedDays.add(dayOffset);
-      if (this._showSchedule) this._render();
+      if (settle(data ?? {}) && this._showSchedule) this._render();
     }).catch((err) => {
       console.error("Error fetching Naolib schedules:", err);
-      if (this._showSchedule) {
+      if (settle() && this._showSchedule) {
         this.content.innerHTML = `${renderTimetableHeader()}${message(
           `Erreur de chargement des horaires : ${errorText(err)}`
         )}`;
       }
-    }).finally(() => {
-      this._fetchingDays.delete(dayOffset);
     });
   }
   _initShadowDom() {
@@ -1459,11 +1524,12 @@ var NaolibCard = class extends NaolibBaseCard {
     }
     const config = this.config;
     if (this._showSchedule) {
+      if (this._timetables.rollover()) this._fetchSchedules(this._dayOffset);
       this._setContent(
         renderTimetable({
-          schedules: this._schedulesByDay.get(this._dayOffset) || {},
-          fetched: this._fetchedDays.has(this._dayOffset),
-          expired: this._expiredDays.has(this._dayOffset),
+          schedules: this._timetables.timetable(this._dayOffset),
+          fetched: this._timetables.isFetched(this._dayOffset),
+          expired: this._timetables.isExpired(this._dayOffset),
           config,
           selectedLine: this._selectedLine,
           directionByLine: this._directionByLine,
@@ -1607,8 +1673,9 @@ function rangesHtml(vehicles) {
         </div>
     `;
 }
+var APP_URL_SCHEMES = /^(https|voiapp):/i;
 function appLinkHtml(url) {
-  if (typeof url !== "string" || !url) return "";
+  if (typeof url !== "string" || !APP_URL_SCHEMES.test(url)) return "";
   return `<a class="bike-app" href="${esc(url)}" rel="noopener">Ouvrir l'application</a>`;
 }
 function nearbyRowHtml(station, features) {
@@ -1843,7 +1910,7 @@ function lineOptions(hass, config) {
     departures2.map((departure) => String(departure.line ?? "")).filter(Boolean)
   );
   for (const line of config.lines) lines.add(String(line));
-  return [...lines].sort((a, b) => a.localeCompare(b, void 0, { numeric: true })).map((line) => ({ value: line, label: line }));
+  return [...lines].sort(compareLines).map((line) => ({ value: line, label: line }));
 }
 function buildSchema3(hass, config) {
   return [

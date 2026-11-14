@@ -3,6 +3,9 @@
 import aiohttp
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import pytest
+from pytest_homeassistant_custom_component.test_util.aiohttp import (
+    AiohttpClientMockResponse,
+)
 
 from custom_components.naolib.api import NaolibApiClient
 from custom_components.naolib.const import SIRI_NAMESPACE, SIRI_URL
@@ -122,6 +125,32 @@ async def test_fetch_indexes_the_whole_network(hass, aioclient_mock) -> None:
     client = NaolibApiClient(hass, async_get_clientsession(hass))
 
     assert set(await client.async_get_all_departures()) == {"QUAY1"}
+
+
+async def test_fetch_asks_for_the_wanted_quays_once_answered(
+    hass, aioclient_mock
+) -> None:
+    """A stop registered while the request was on its way is served too."""
+    wanted = {"QUAY1"}
+
+    async def answer(*_args: object) -> AiohttpClientMockResponse:
+        # Registered after the request left.
+        wanted.add("QUAY2")
+        return AiohttpClientMockResponse(
+            "POST",
+            SIRI_URL,
+            response=_payload(
+                _visit("QUAY1", "C3"), _visit("QUAY2", "2"), _visit("QUAY3", "4")
+            ),
+        )
+
+    aioclient_mock.post(SIRI_URL, side_effect=answer)
+    client = NaolibApiClient(hass, async_get_clientsession(hass))
+
+    assert set(await client.async_get_all_departures(lambda: wanted)) == {
+        "QUAY1",
+        "QUAY2",
+    }
 
 
 @pytest.mark.parametrize("status", [429, 503, 500])

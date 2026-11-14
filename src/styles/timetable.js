@@ -50,7 +50,7 @@ export const timetable = `
     /* The negative margin compensates the padding, which keeps the grid aligned
        with the other sections while leaving room for the "now" ring and the
        last row at full scroll. */
-    .tt-hours { max-height: 380px; overflow-y: auto; overscroll-behavior: contain; position: relative; margin: 0 -4px; padding: 4px 12px 6px 4px; scrollbar-width: thin; scrollbar-color: var(--naolib-scroll-thumb) transparent; }
+    .tt-hours { max-height: 380px; overflow-y: auto; position: relative; margin: 0 -4px; padding: 4px 12px 6px 4px; scrollbar-width: thin; scrollbar-color: var(--naolib-scroll-thumb) transparent; }
     .tt-hours::-webkit-scrollbar { width: 8px; }
     .tt-hours::-webkit-scrollbar-track { background: transparent; }
     .tt-hours::-webkit-scrollbar-thumb { background: var(--naolib-scroll-thumb); border: 2px solid transparent; background-clip: content-box; border-radius: 4px; }

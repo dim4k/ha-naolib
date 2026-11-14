@@ -2,6 +2,7 @@ import { DEFAULT_CONFIG, MAX_LINES_LIMIT, MAX_WALK_TIME } from "./config.js";
 import { directionLabel, directionTermini } from "./directions.js";
 import { isDepartureEntity, matchingEntities } from "./entities.js";
 import { NaolibFormEditor } from "./form-editor.js";
+import { compareLines } from "./lines.js";
 
 const LABELS = {
     entity: "Entité (arrêt Naolib)",
@@ -53,7 +54,7 @@ function lineOptions(hass, config) {
     );
     for (const line of config.lines) lines.add(String(line));
     return [...lines]
-        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+        .sort(compareLines)
         .map((line) => ({ value: line, label: line }));
 }
 

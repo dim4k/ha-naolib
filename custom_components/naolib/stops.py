@@ -58,14 +58,15 @@ def nearest(
     ``places`` are stops or bike stations: anything with ``lat`` and ``lon``.
     ``radius`` drops the places farther away than that many meters.
     """
+    # Only the places kept are copied: the catalogs hold thousands of them.
     scored = [
-        {**place, "distance": round(haversine(lat, lon, place["lat"], place["lon"]))}
+        (round(haversine(lat, lon, place["lat"], place["lon"])), place)
         for place in places
     ]
     if radius is not None:
-        scored = [place for place in scored if place["distance"] <= radius]
-    scored.sort(key=lambda place: place["distance"])
-    return scored[:limit]
+        scored = [item for item in scored if item[0] <= radius]
+    scored.sort(key=lambda item: item[0])
+    return [{**place, "distance": distance} for distance, place in scored[:limit]]
 
 
 def normalize(value: str) -> str:

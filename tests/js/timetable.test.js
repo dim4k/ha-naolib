@@ -193,6 +193,20 @@ describe("renderTimetable", () => {
         );
     });
 
+    it("still shows the day before in the small hours", () => {
+        const html = render({
+            schedules: {
+                "N1|1": { destination: "Commerce", times: { 23: ["40"], "01": ["15", "45"] } },
+            },
+            now: new Date(2026, 7, 5, 1, 30).getTime(),
+        });
+        // Wednesday 01:30 is the tail of Tuesday's service.
+        expect(html).toContain("Mardi 4 ao\u00fbt");
+        expect(html).toContain('class="tt-min past">40<');
+        expect(html).toContain('class="tt-min past">15<');
+        expect(html).toContain('class="tt-min next">45<');
+    });
+
     it("announces the first departure and dims nothing on another day", () => {
         const html = render({ selectedLine: "C1", dayOffset: 1 });
         expect(html).toContain("Mercredi 5 ao\u00fbt");

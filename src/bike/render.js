@@ -87,8 +87,13 @@ function rangesHtml(vehicles) {
     `;
 }
 
+// The link comes from an entity attribute, and the card recognises its
+// entities by their attributes alone: only the schemes an operator's app is
+// reached through are followed, never a "javascript:" one.
+const APP_URL_SCHEMES = /^(https|voiapp):/i;
+
 function appLinkHtml(url) {
-    if (typeof url !== "string" || !url) return "";
+    if (typeof url !== "string" || !APP_URL_SCHEMES.test(url)) return "";
     return `<a class="bike-app" href="${esc(url)}" rel="noopener">Ouvrir l'application</a>`;
 }
 

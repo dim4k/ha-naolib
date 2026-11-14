@@ -14,6 +14,16 @@ export const MAX_RADIUS = 3000;
 export const MAX_STOPS = 15;
 export const MAX_DEPARTURES = 10;
 
+// How long a failed subscription waits before being attempted again.
+export const SUBSCRIBE_RETRY_MS = 30000;
+
+// Whether a subscription may be attempted. Only the one that just failed has
+// to wait; another entity, radius or number of stops is tried right away.
+// `failure` is `{ key, retryAt }`, or nothing when the last attempt went well.
+export function canSubscribe(failure, key, now = Date.now()) {
+    return !failure || failure.key !== key || now >= failure.retryAt;
+}
+
 const check = configValidator("naolib-around-card");
 
 export function normalizeAroundConfig(config) {
