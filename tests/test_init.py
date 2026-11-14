@@ -1,5 +1,6 @@
 """Tests for the entry lifecycle and the get_departures action."""
 
+import asyncio
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ from homeassistant.helpers import (
     entity_registry as er,
     issue_registry as ir,
 )
+from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -82,6 +84,39 @@ async def _setup(hass: HomeAssistant, entry: MockConfigEntry) -> None:
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
+
+
+async def test_entries_set_up_together_share_one_request(hass: HomeAssistant) -> None:
+    """Starting with several stops calls the rate-limited endpoint only once."""
+    for stop_code, quay in (("STOP1", "QUAY1"), ("STOP2", "QUAY2"), ("STOP3", "QUAY3")):
+        _entry(stop_code, quay).add_to_hass(hass)
+    calls = 0
+
+    async def fetch(*_args: object) -> dict[str, list[dict[str, str]]]:
+        nonlocal calls
+        calls += 1
+        # The request leaves the event loop: the other entries are set up
+        # before its answer comes back.
+        await asyncio.sleep(0)
+        return {**_network("QUAY1"), **_network("QUAY2"), **_network("QUAY3")}
+
+    with (
+        patch(
+            "custom_components.naolib.coordinator.NaolibApiClient"
+            ".async_get_all_departures",
+            side_effect=fetch,
+        ),
+        patch("custom_components.naolib.coordinator.last_departures", return_value={}),
+    ):
+        assert await async_setup_component(hass, DOMAIN, {})
+        await hass.async_block_till_done()
+
+    assert calls == 1
+    for stop in ("stop1", "stop2", "stop3"):
+        state = hass.states.get(f"sensor.stop_label_{stop}_next_departures")
+        assert state is not None
+        assert len(state.attributes["next_departures"]) == 1
+    hass.data[DOMAIN].departures._cancel_deferred()
 
 
 async def test_setup_and_unload(hass: HomeAssistant) -> None:

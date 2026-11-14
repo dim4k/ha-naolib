@@ -181,11 +181,14 @@ class NaolibDeparturesCoordinator(NaolibSharedCoordinator[NaolibStop, Departures
             (stop for stop in self.tracked.values() if stop.code == stop_code), None
         )
 
+    def _wanted_quays(self) -> set[str] | None:
+        """Return the quays of every stop served; None (all) without any."""
+        return {quay for stop in self.tracked.values() for quay in stop.quays} or None
+
     async def _async_update_data(self) -> Departures:
         """Fetch the whole network once."""
-        wanted = {quay for stop in self.tracked.values() for quay in stop.quays}
         self._last_fetch = time.monotonic()
-        data = await self.api.async_get_all_departures(wanted or None)
+        data = await self.api.async_get_all_departures(self._wanted_quays)
         if data is None:
             return self._serve_last_snapshot()
 

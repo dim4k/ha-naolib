@@ -10,6 +10,7 @@ one request every 30 seconds per IP).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import io
 import logging
 from typing import Any
@@ -82,13 +83,15 @@ class NaolibApiClient:
         )
 
     async def async_get_all_departures(
-        self, quays: set[str] | None = None
+        self, quays: Callable[[], set[str] | None] | None = None
     ) -> dict[str, list[dict[str, Any]]] | None:
         """Fetch the whole network and index departures by quay id.
 
         ``quays`` restricts the result to the quays actually served by a
         configured stop: the response covers the whole network, and building an
-        object for each of its thousands of departures is pure waste.
+        object for each of its thousands of departures is pure waste. It is
+        called once the response is there, so a stop registered while the
+        request was on its way is served by it too.
 
         Returns a mapping ``{quay_id: [departure, ...]}`` or ``None`` on error.
         """
@@ -125,7 +128,9 @@ class NaolibApiClient:
 
         # Parsing a whole-network response is slow enough to stall the event
         # loop on the low-end hardware Home Assistant often runs on.
-        return await self._hass.async_add_executor_job(self._parse, payload, quays)
+        return await self._hass.async_add_executor_job(
+            self._parse, payload, quays() if quays is not None else None
+        )
 
     def _parse(
         self, payload: bytes, quays: set[str] | None = None

@@ -343,15 +343,13 @@ def _schedule_refresh(
     The departures endpoint is rate-limited (1 request / 30 s), so setup must
     not fail or retry on a transient 429 -- the coordinator will keep polling.
     An entry added later needs a refresh too, since the snapshot only holds
-    what was registered when it was taken; the debouncer collapses the
-    requests fired when several entries are set up at once.
+    what was registered when it was taken. The refresh is always a requested
+    one, the first included: the entries set up together at startup would
+    otherwise each call the endpoint, and all but one be turned down.
     """
-    refresh = (
-        coordinator.async_refresh()
-        if coordinator.data is None
-        else coordinator.async_request_refresh()
+    entry.async_create_background_task(
+        hass, coordinator.async_request_refresh(), "naolib_refresh"
     )
-    entry.async_create_background_task(hass, refresh, "naolib_refresh")
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: NaolibConfigEntry) -> None:
