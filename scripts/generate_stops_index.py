@@ -54,6 +54,10 @@ CALENDAR_PATH = _DATA_DIR / "calendar.json"
 # diagnostics along with the generation date.
 SCHEDULES_FORMAT_VERSION = "1"
 
+# The refresh is released without review: a feed that lost more than this
+# share of its stations is taken for a broken export rather than shipped.
+MIN_KEPT_RATIO = 0.8
+
 _WEEKDAYS = (
     "monday",
     "tuesday",
@@ -343,25 +347,79 @@ def _write_schedules(path: Path, schedules: dict[str, dict]) -> None:
         connection.close()
 
 
+def _previous_station_count() -> int:
+    """Return how many stations the shipped index holds, 0 if there is none."""
+    try:
+        with OUTPUT_PATH.open(encoding="utf-8") as fh:
+            return len(json.load(fh))
+    except (OSError, ValueError):
+        return 0
+
+
+def check_feed(
+    index: list[dict],
+    schedules: dict[str, dict],
+    calendar: dict[str, dict],
+    *,
+    previous_stations: int,
+    today: str,
+) -> None:
+    """Refuse a feed that would ship empty, truncated or expired data.
+
+    ``today`` is a ``YYYYMMDD`` date, like the ones of the calendar.
+    """
+    if not index:
+        raise RuntimeError("The GTFS feed holds no station")
+    if len(index) < previous_stations * MIN_KEPT_RATIO:
+        raise RuntimeError(
+            f"The GTFS feed holds {len(index)} stations, down from "
+            f"{previous_stations}: it looks truncated"
+        )
+    if len(schedules) < len(index) * MIN_KEPT_RATIO:
+        raise RuntimeError(
+            f"Only {len(schedules)} of the {len(index)} stations have a timetable"
+        )
+    end = max(
+        (
+            date
+            for info in calendar.values()
+            for date in (info.get("end", ""), *info.get("added", []))
+        ),
+        default="",
+    )
+    if end < today:
+        raise RuntimeError(
+            f"The GTFS calendar ends on {end or 'no date'}: every day would be empty"
+        )
+
+
 def main() -> None:
     """Download the GTFS feed and regenerate every embedded data file."""
     zip_url = _resolve_gtfs_url()
     archive = _download_archive(zip_url)
 
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-
     with zipfile.ZipFile(io.BytesIO(archive)) as zf:
         rows = _read_member(zf, "stops.txt")
         index = build_index(rows)
-        _write_json(OUTPUT_PATH, index)
-        print(f"Wrote {len(index)} stations to {OUTPUT_PATH}")
-
-        quay_to_station = build_quay_to_station(rows)
-        schedules = build_schedules(zf, quay_to_station)
+        schedules = build_schedules(zf, build_quay_to_station(rows))
         calendar = build_calendar(zf)
 
     # Drop stations that ended up without any timetable.
     schedules = {station: groups for station, groups in schedules.items() if groups}
+
+    # Nothing is written before the whole feed is known to be sound.
+    check_feed(
+        index,
+        schedules,
+        calendar,
+        previous_stations=_previous_station_count(),
+        today=datetime.now(UTC).strftime("%Y%m%d"),
+    )
+
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _write_json(OUTPUT_PATH, index)
+    print(f"Wrote {len(index)} stations to {OUTPUT_PATH}")
+
     _write_schedules(SCHEDULES_PATH, schedules)
     print(f"Wrote {len(schedules)} station timetables to {SCHEDULES_PATH}")
 

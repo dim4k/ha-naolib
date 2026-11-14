@@ -18,10 +18,20 @@ jobs:
             - name: Set up Python
               uses: actions/setup-python@v5
               with:
-                  python-version: "3.12"
+                  python-version: "3.13"
 
+            # The script itself refuses a feed that looks empty, truncated or
+            # expired, and exits before writing anything.
             - name: Regenerate stops index and timetables
               run: python scripts/generate_stops_index.py
+
+            # What follows is released to every user without review: the
+            # integration must still pass its tests on the refreshed data.
+            - name: Test the integration against the refreshed data
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install -r requirements_test.txt
+                  pytest
 
             # HACS installs releases, not main: without a release the refreshed
             # timetables never reach users, and the shipped calendar runs out
