@@ -191,6 +191,28 @@ describe("stationFeatures", () => {
 describe("renderBikeStation on a Voi spot", () => {
     const config = normalizeBikeConfig({});
 
+    it("links to the operator's app", () => {
+        const html = renderBikeStation(voiSpot(), [], config);
+        expect(html).toMatch(/href="voiapp:\/\/closest_vehicle"/);
+        expect(
+            renderBikeStation(voiSpot({ app_url: "https://voi.com/app" }), [], config),
+        ).toMatch(/href="https:\/\/voi.com\/app"/);
+    });
+
+    it("drops an app link with an unexpected scheme", () => {
+        const rejected = [
+            "javascript:alert(1)",
+            " javascript:alert(1)",
+            "data:text/html,x",
+            "/local/x",
+            42,
+        ];
+        for (const url of rejected) {
+            const html = renderBikeStation(voiSpot({ app_url: url }), [], config);
+            expect(html).not.toMatch(/bike-app/);
+        }
+    });
+
     it("shows the best range instead of the docks", () => {
         const html = renderBikeStation(voiSpot(), [], config);
         expect(html).not.toMatch(/places/);

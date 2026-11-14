@@ -1607,8 +1607,9 @@ function rangesHtml(vehicles) {
         </div>
     `;
 }
+var APP_URL_SCHEMES = /^(https|voiapp):/i;
 function appLinkHtml(url) {
-  if (typeof url !== "string" || !url) return "";
+  if (typeof url !== "string" || !APP_URL_SCHEMES.test(url)) return "";
   return `<a class="bike-app" href="${esc(url)}" rel="noopener">Ouvrir l'application</a>`;
 }
 function nearbyRowHtml(station, features) {
