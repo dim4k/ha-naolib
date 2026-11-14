@@ -12,13 +12,11 @@ from custom_components.naolib import schedules
 _GROUPS = {
     "C3|1": {
         "line": "C3",
-        "direction": 1,
         "destination": "Hôtel Dieu",
         "services": {"S1": ["0730", "0745"], "S2": ["2350"], "S3": ["0010"]},
     },
     "2|2": {
         "line": "2",
-        "direction": 2,
         "destination": "",
         "services": {"S1": ["0800"]},
     },
@@ -50,7 +48,7 @@ def test_load_station_timetable_returns_trips() -> None:
 
     assert timetable
     first = next(iter(timetable.values()))
-    assert {"line", "direction", "destination", "services"} <= set(first)
+    assert {"line", "destination", "services"} <= set(first)
 
 
 def test_load_station_timetable_unknown_station() -> None:

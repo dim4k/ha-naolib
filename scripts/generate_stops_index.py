@@ -52,7 +52,7 @@ CALENDAR_PATH = _DATA_DIR / "calendar.json"
 
 # Bumped whenever the stored payload changes shape. Reported in the integration
 # diagnostics along with the generation date.
-SCHEDULES_FORMAT_VERSION = "1"
+SCHEDULES_FORMAT_VERSION = "2"
 
 # The refresh is released without review: a feed that lost more than this
 # share of its stations is taken for a broken export rather than shipped.
@@ -169,8 +169,9 @@ def build_schedules(
 ) -> dict[str, dict]:
     """Build per-station theoretical timetables from the GTFS feed.
 
-    Returns ``{station_id: {group_key: {line, direction, destination,
-    services: {service_id: [HHMM, ...]}}}}``.
+    Returns ``{station_id: {group_key: {line, destination,
+    services: {service_id: [HHMM, ...]}}}}``. The group key is
+    ``"{line}|{direction}"``, the only place the direction is carried.
     """
     routes = {
         row["route_id"]: (row.get("route_short_name") or row.get("route_id") or "")
@@ -211,7 +212,6 @@ def build_schedules(
             group_key,
             {
                 "line": line,
-                "direction": direction,
                 "headsigns": Counter(),
                 "services": {},
             },
@@ -229,7 +229,6 @@ def build_schedules(
             destination = headsigns.most_common(1)[0][0] if headsigns else ""
             out_groups[group_key] = {
                 "line": group["line"],
-                "direction": group["direction"],
                 "destination": destination,
                 "services": {
                     service_id: sorted(times)
@@ -291,6 +290,33 @@ def _write_json(path: Path, data) -> None:
     with path.open("w", encoding="utf-8") as fh:
         json.dump(data, fh, ensure_ascii=False, separators=(",", ":"))
         fh.write("\n")
+
+
+def stored_schedules(path: Path) -> dict[str, dict] | None:
+    """Return the timetables a database holds, None when they cannot be reused.
+
+    The database carries its generation date, so writing it again always
+    changes the file: comparing what it holds is what tells a refresh that
+    brought nothing new, which is then not worth a release.
+    """
+    if not path.exists():
+        return None
+    try:
+        connection = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            meta = dict(connection.execute("SELECT key, value FROM meta"))
+            if meta.get("format_version") != SCHEDULES_FORMAT_VERSION:
+                return None
+            return {
+                station: json.loads(zlib.decompress(payload))
+                for station, payload in connection.execute(
+                    "SELECT station_id, payload FROM station_schedules"
+                )
+            }
+        finally:
+            connection.close()
+    except (sqlite3.Error, zlib.error, ValueError):
+        return None
 
 
 def _write_schedules(path: Path, schedules: dict[str, dict]) -> None:
@@ -420,8 +446,11 @@ def main() -> None:
     _write_json(OUTPUT_PATH, index)
     print(f"Wrote {len(index)} stations to {OUTPUT_PATH}")
 
-    _write_schedules(SCHEDULES_PATH, schedules)
-    print(f"Wrote {len(schedules)} station timetables to {SCHEDULES_PATH}")
+    if stored_schedules(SCHEDULES_PATH) == schedules:
+        print(f"Timetables unchanged, kept {SCHEDULES_PATH}")
+    else:
+        _write_schedules(SCHEDULES_PATH, schedules)
+        print(f"Wrote {len(schedules)} station timetables to {SCHEDULES_PATH}")
 
     _write_json(CALENDAR_PATH, calendar)
     print(f"Wrote {len(calendar)} services to {CALENDAR_PATH}")

@@ -1,7 +1,14 @@
 """Tests for the sanity checks of the embedded data generator."""
 
+from pathlib import Path
+import sqlite3
+
 import pytest
-from scripts.generate_stops_index import check_feed
+from scripts.generate_stops_index import (
+    _write_schedules,
+    check_feed,
+    stored_schedules,
+)
 
 _INDEX = [{"id": str(number)} for number in range(10)]
 _SCHEDULES = {str(number): {"1|1": {}} for number in range(10)}
@@ -56,3 +63,39 @@ def test_an_expired_calendar_is_refused() -> None:
         _check(today="20270215")
     with pytest.raises(RuntimeError, match="calendar ends"):
         _check(calendar={})
+
+
+_TIMETABLES = {
+    "STATION": {
+        "C3|1": {
+            "line": "C3",
+            "destination": "Hôtel Dieu",
+            "services": {"weekdays": ["0805", "0835"], "sunday": ["0905"]},
+        }
+    }
+}
+
+
+def test_stored_schedules_reads_back_what_was_written(tmp_path: Path) -> None:
+    """An unchanged feed compares equal to the database, despite its date."""
+    path = tmp_path / "schedules.sqlite"
+    _write_schedules(path, _TIMETABLES)
+
+    assert stored_schedules(path) == _TIMETABLES
+
+
+def test_stored_schedules_cannot_reuse_another_database(tmp_path: Path) -> None:
+    """A missing, unreadable or differently shaped database is written again."""
+    path = tmp_path / "schedules.sqlite"
+    assert stored_schedules(path) is None
+
+    path.write_bytes(b"not a database")
+    assert stored_schedules(path) is None
+
+    path.unlink()
+    _write_schedules(path, _TIMETABLES)
+    connection = sqlite3.connect(path)
+    connection.execute("UPDATE meta SET value = '0' WHERE key = 'format_version'")
+    connection.commit()
+    connection.close()
+    assert stored_schedules(path) is None
